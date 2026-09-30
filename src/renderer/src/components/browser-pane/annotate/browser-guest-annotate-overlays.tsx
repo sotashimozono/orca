@@ -95,7 +95,12 @@ export function BrowserGuestAnnotateOverlays({
         : null}
       {pendingAnnotationPayload ? (
         <PendingBrowserAnnotationCard
-          payload={pendingAnnotationPayload}
+          title={
+            pendingAnnotationPayload.target.accessibility.accessibleName ||
+            pendingAnnotationPayload.target.textSnippet ||
+            pendingAnnotationPayload.target.tagName
+          }
+          subtitle={pendingAnnotationPayload.target.selector}
           anchor={getBrowserOverlayAnchor(
             pendingAnnotationPayload,
             containerRef.current,
@@ -110,6 +115,11 @@ export function BrowserGuestAnnotateOverlays({
       {browserAnnotations.length > 0 && browserAnnotationTrayOpen ? (
         <BrowserPageAnnotationTray
           browserAnnotations={browserAnnotations}
+          getAnnotationTitle={(annotation) =>
+            annotation.payload.target.accessibility.accessibleName ||
+            annotation.payload.target.textSnippet ||
+            annotation.payload.target.tagName
+          }
           annotationTraySendOpen={annotationTraySendOpen}
           handleAnnotationTraySendOpenChange={handleAnnotationTraySendOpenChange}
           worktreeId={worktreeId}
