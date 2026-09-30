@@ -2,10 +2,10 @@ import { rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Page } from '@stablyai/playwright-test'
 import { expect, test } from './helpers/orca-app'
-import { createPdfFindFixture } from './helpers/pdf-find-fixture'
+import { createPdfParagraphFixture } from './helpers/pdf-paragraph-fixture'
 
-// The fixture's pages are US Letter; text starts at x=60 with baselines 92, 132, 172, 212
-// PDF points below the top edge (20pt Helvetica, 40pt leading).
+// The fixture is US Letter: a 20pt "Results" heading at baseline 90, a four-line paragraph at
+// baselines 130–172, and an indented paragraph at 186–200 (PDF points below the top edge).
 const PAGE_WIDTH_PT = 612
 
 async function pdfToClient(page: Page, x: number, y: number): Promise<{ x: number; y: number }> {
@@ -36,14 +36,14 @@ async function dragPdfBox(
   }
 }
 
-test('PDF annotate mode: box, Shift+drag areas and pins reach the agent prompt', async ({
+test('PDF annotate mode: boxes, paragraph clicks and pins reach the agent prompt', async ({
   orcaPage,
   electronApp,
   seededRepoPath,
   registerPostElectronShutdownCleanup
 }, testInfo) => {
   const filePath = path.join(seededRepoPath, 'pdf-annotate-fixture.pdf')
-  writeFileSync(filePath, createPdfFindFixture())
+  writeFileSync(filePath, createPdfParagraphFixture())
   registerPostElectronShutdownCleanup(async () => rmSync(filePath, { force: true }))
   // Why: the host OS locale drives the UI language; pin English so locators are stable.
   await orcaPage.evaluate(() =>
@@ -63,7 +63,7 @@ test('PDF annotate mode: box, Shift+drag areas and pins reach the agent prompt',
     })
   }, filePath)
   await expect(orcaPage.locator('.pdfViewer .page').first().locator('.textLayer')).toContainText(
-    'needle result 1'
+    'The first paragraph'
   )
   const shot = (name: string) => orcaPage.screenshot({ path: testInfo.outputPath(`${name}.png`) })
   const annotate = orcaPage.getByRole('button', { name: 'Annotate PDF' })
@@ -73,35 +73,52 @@ test('PDF annotate mode: box, Shift+drag areas and pins reach the agent prompt',
   await annotate.click()
   await expect(annotate).toHaveAttribute('aria-pressed', 'true')
 
-  await dragPdfBox(orcaPage, [55, 112, 260, 138])
-  await expect(card).toContainText('p.1 "needle result 1"')
-  await dragPdfBox(orcaPage, [55, 152, 260, 178], { shift: true })
-  await expect(card).toContainText('p.1 (2 areas) "needle result 1 … needle result 2"')
+  // A dragged box, then Shift+click adds a whole paragraph to the same comment.
+  await dragPdfBox(orcaPage, [66, 70, 170, 98])
+  await expect(card).toContainText('p.1 "Results"')
+  const secondParagraph = await pdfToClient(orcaPage, 250, 197)
+  await orcaPage.keyboard.down('Shift')
+  await orcaPage.mouse.click(secondParagraph.x, secondParagraph.y)
+  await orcaPage.keyboard.up('Shift')
+  await expect(card).toContainText('p.1 (2 areas) "Results … A second paragraph')
   await expect(card).toHaveCSS('opacity', '1')
-  await shot('01-two-areas-pending')
-  await card.getByRole('textbox').fill('Merge these two results')
+  await shot('01-box-plus-paragraph-pending')
+  await card.getByRole('textbox').fill('Retitle the section to match this paragraph')
   await card.getByRole('button', { name: /Add/ }).click()
   await expect(card).toHaveCount(0)
   await expect(orcaPage.getByText('1 annotation', { exact: true })).toBeVisible()
   // Annotate mode stays armed after adding, like Design Mode.
   await expect(annotate).toHaveAttribute('aria-pressed', 'true')
 
-  const pin = await pdfToClient(orcaPage, 90, 205)
-  await orcaPage.mouse.click(pin.x, pin.y)
-  await expect(card).toContainText('beacon alternate query')
-  await card.getByRole('textbox').fill('Rename the query')
+  // A plain click on any line picks its whole paragraph.
+  const firstParagraph = await pdfToClient(orcaPage, 200, 155)
+  await orcaPage.mouse.click(firstParagraph.x, firstParagraph.y)
+  await expect(card).toContainText('p.1 "The first paragraph opens')
+  await card.getByRole('textbox').fill('Split this into two sentences')
   await card.getByRole('button', { name: /Add/ }).click()
-  await expect(orcaPage.getByText('2 annotations', { exact: true })).toBeVisible()
-  await expect(badges).toHaveText(['1', '2'])
-  await shot('02-two-annotations')
+
+  // A click where there is no text drops a pin.
+  const margin = await pdfToClient(orcaPage, 300, 400)
+  await orcaPage.mouse.click(margin.x, margin.y)
+  await expect(card).toContainText('p.1')
+  await card.getByRole('textbox').fill('Add a figure here')
+  await card.getByRole('button', { name: /Add/ }).click()
+  await expect(orcaPage.getByText('3 annotations', { exact: true })).toBeVisible()
+  await expect(badges).toHaveText(['1', '2', '3'])
+  await shot('02-three-annotations')
 
   await orcaPage.getByRole('button', { name: 'Copy' }).click()
   const prompt = await electronApp.evaluate(({ clipboard }) => clipboard.readText())
   writeFileSync(testInfo.outputPath('prompt.md'), prompt)
   expect(prompt).toContain('## PDF Feedback: pdf-annotate-fixture.pdf')
-  expect(prompt).toContain('**Text in areas (approximate):** "needle result 1 … needle result 2"')
-  expect(prompt).toContain('**Feedback:** Merge these two results')
-  expect(prompt).toContain('**Text:** "beacon alternate query"')
+  expect(prompt).toContain(
+    '**Text in areas (approximate):** "Results … A second paragraph starts with an indent, which is how typeset papers mark a new paragraph without extra space."'
+  )
+  expect(prompt).toContain(
+    '**Text in areas (approximate):** "The first paragraph opens the section and runs across several full lines so that a click anywhere inside it should pick the whole block at once and hand the agent every line of it together rather than just one text run of the paragraph."'
+  )
+  expect(prompt).toContain('**Feedback:** Add a figure here')
+  expect(prompt.match(/\*\*Position:\*\*/g)).toHaveLength(1)
 
   const before = await badges.first().boundingBox()
   await orcaPage.getByTitle('Zoom in').click()
@@ -111,7 +128,7 @@ test('PDF annotate mode: box, Shift+drag areas and pins reach the agent prompt',
   // Visual proof only: the overlay uses theme tokens, so dark mode needs no separate logic.
   await orcaPage.evaluate(() => window.__store!.getState().updateSettings({ theme: 'dark' }))
   await expect(orcaPage.locator('html')).toHaveClass(/dark/)
-  await dragPdfBox(orcaPage, [55, 112, 260, 138])
+  await dragPdfBox(orcaPage, [66, 70, 170, 98])
   await expect(card).toHaveCSS('opacity', '1')
   await shot('04-dark-pending')
   // Escape on the open card only dismisses the card; the mode stays armed.

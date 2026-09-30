@@ -85,3 +85,17 @@ export function pdfRegionFromClientRect(
     bottom: Math.max(a.y, b.y)
   }
 }
+
+/** Content-box x of a page's right edge, so popovers can sit in the gutter beside the page. */
+export function pageRightContentX(
+  viewer: PDFViewer,
+  container: HTMLElement,
+  page: number
+): number | null {
+  const pageView = pageViewFor(viewer, page)
+  if (!pageView) {
+    return null
+  }
+  const rect = pageView.div.getBoundingClientRect()
+  return clientToContentPoint(container, rect.right, rect.top).x
+}

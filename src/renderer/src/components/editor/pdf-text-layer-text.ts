@@ -1,3 +1,4 @@
+import { paragraphRunIndexes } from './pdf-text-blocks'
 /** A rect in the scroll container's content box, so overlays scroll with the pages. */
 export type PdfContentRect = { x: number; y: number; width: number; height: number }
 
@@ -17,8 +18,27 @@ export function clientToContentPoint(
 /** pdf.js text-layer runs; markedContent spans are structural wrappers without their own text. */
 export const TEXT_RUN_SELECTOR = '.textLayer span:not(.markedContent)'
 
-export function clamp(value: number, min: number, max: number): number {
+function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
+}
+
+/** The client box from a drag's start to `(x, y)`, clamped to the page it started on. */
+export function dragRectOnPage(
+  pageDiv: Element,
+  startX: number,
+  startY: number,
+  x: number,
+  y: number
+): DOMRect {
+  const page = pageDiv.getBoundingClientRect()
+  const endX = clamp(x, page.left, page.right)
+  const endY = clamp(y, page.top, page.bottom)
+  return new DOMRect(
+    Math.min(startX, endX),
+    Math.min(startY, endY),
+    Math.abs(endX - startX),
+    Math.abs(endY - startY)
+  )
 }
 
 export function contentRectBetween(
@@ -103,6 +123,30 @@ export function textInClientRect(pageDiv: HTMLElement, rect: DOMRect): string | 
     }
   }
   return parts.length > 0 ? parts.join(' ') : null
+}
+
+/** The paragraph around a text run: its client box and text, for hover and click picking. */
+export function paragraphAt(
+  target: Element
+): { pageDiv: HTMLElement; rect: DOMRect; text: string } | null {
+  const run = target.closest(TEXT_RUN_SELECTOR)
+  const pageDiv = target.closest<HTMLElement>('.page[data-page-number]')
+  if (!run || !pageDiv) {
+    return null
+  }
+  const runs = [...pageDiv.querySelectorAll(TEXT_RUN_SELECTOR)].filter((r) => r.textContent?.trim())
+  const hit = runs.indexOf(run)
+  if (hit === -1) {
+    return null
+  }
+  const boxes = runs.map((r) => r.getBoundingClientRect())
+  const picked = paragraphRunIndexes(boxes, hit)
+  const left = Math.min(...picked.map((i) => boxes[i].left))
+  const top = Math.min(...picked.map((i) => boxes[i].top))
+  const right = Math.max(...picked.map((i) => boxes[i].right))
+  const bottom = Math.max(...picked.map((i) => boxes[i].bottom))
+  const text = picked.map((i) => runs[i].textContent?.trim() ?? '').join(' ')
+  return { pageDiv, rect: new DOMRect(left, top, right - left, bottom - top), text }
 }
 
 export function joinQuotes(a: string | null, b: string | null): string | null {

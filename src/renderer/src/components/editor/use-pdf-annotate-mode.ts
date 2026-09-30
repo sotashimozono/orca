@@ -3,17 +3,13 @@ import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import { useAppStore } from '@/store'
 import type { PdfAnnotation, PdfRegion } from '@/store/slices/pdf-annotations'
 import type { BrowserAnnotationIntent } from '../../../../shared/browser-grab-types'
+import { pdfPagePointAt, pdfRegionFromClientRect, type PdfPagePoint } from './pdf-page-geometry'
+import { projectPdfAnnotations } from './pdf-annotation-projection'
 import {
-  pdfPagePointAt,
-  pdfPointToContentPoint,
-  pdfRegionFromClientRect,
-  pdfRegionToContentRect,
-  type PdfPagePoint
-} from './pdf-page-geometry'
-import {
-  clamp,
+  dragRectOnPage,
   contentRectBetween,
   joinQuotes,
+  paragraphAt,
   TEXT_RUN_SELECTOR,
   textInClientRect,
   type PdfContentRect
@@ -101,47 +97,56 @@ export function usePdfAnnotateMode({
     }
     let drag: Drag | null = null
 
-    const clampToPage = (pageDiv: HTMLElement, x: number, y: number) => {
-      const rect = pageDiv.getBoundingClientRect()
-      return { x: clamp(x, rect.left, rect.right), y: clamp(y, rect.top, rect.bottom) }
-    }
-
-    const finishClick = (viewer: PDFViewer, target: Element, x: number, y: number): void => {
-      const point = pdfPagePointAt(viewer, target, x, y)
-      if (!point) {
-        return
-      }
-      const quote = target.closest(TEXT_RUN_SELECTOR)?.textContent?.trim() || null
-      setPending({ ...point, fileKey: key, regions: [], quote })
-    }
-
-    const finishRegion = (viewer: PDFViewer, released: Drag, endX: number, endY: number): void => {
-      const end = clampToPage(released.pageDiv, endX, endY)
-      const clientRect = new DOMRect(
-        Math.min(released.startX, end.x),
-        Math.min(released.startY, end.y),
-        Math.abs(end.x - released.startX),
-        Math.abs(end.y - released.startY)
-      )
-      const region = pdfRegionFromClientRect(viewer, released.pageDiv, clientRect)
+    // Adds a box to the open draft (Shift) or starts a new draft with it.
+    const addArea = (
+      viewer: PDFViewer,
+      pageDiv: Element,
+      clientRect: DOMRect,
+      quote: string | null,
+      append: boolean
+    ): void => {
+      const region = pdfRegionFromClientRect(viewer, pageDiv, clientRect)
       if (!region) {
         return
       }
-      const quote = textInClientRect(released.pageDiv, clientRect)
-      const previous = released.append ? pendingRef.current : null
+      const previous = append ? pendingRef.current : null
       const regions = [...(previous?.regions ?? []), region]
       if (previous) {
         setPending({ ...previous, regions, quote: joinQuotes(previous.quote, quote) })
         return
       }
-      setPending({
-        fileKey: key,
-        page: region.page,
-        x: region.left,
-        y: region.top,
-        regions,
-        quote
-      })
+      setPending({ fileKey: key, page: region.page, x: region.left, y: region.top, regions, quote })
+    }
+
+    // A click on text picks its whole paragraph, like Design Mode picks an element; elsewhere it pins.
+    const finishClick = (
+      viewer: PDFViewer,
+      target: Element,
+      x: number,
+      y: number,
+      append: boolean
+    ): void => {
+      const paragraph = paragraphAt(target)
+      if (paragraph) {
+        addArea(viewer, paragraph.pageDiv, paragraph.rect, paragraph.text, append)
+        return
+      }
+      const point = append ? null : pdfPagePointAt(viewer, target, x, y)
+      if (point) {
+        setPending({ ...point, fileKey: key, regions: [], quote: null })
+      }
+    }
+
+    const finishRegion = (viewer: PDFViewer, released: Drag, endX: number, endY: number): void => {
+      const clientRect = dragRectOnPage(
+        released.pageDiv,
+        released.startX,
+        released.startY,
+        endX,
+        endY
+      )
+      const quote = textInClientRect(released.pageDiv, clientRect)
+      addArea(viewer, released.pageDiv, clientRect, quote, released.append)
     }
 
     let hoveredRun: Element | null = null
@@ -157,7 +162,7 @@ export function usePdfAnnotateMode({
         return
       }
       hoveredRun = run
-      const box = run?.getBoundingClientRect()
+      const box = run ? paragraphAt(run)?.rect : undefined
       setHoverRect(
         box
           ? contentRectBetween(
@@ -171,8 +176,20 @@ export function usePdfAnnotateMode({
 
     const handleDragMove = (event: PointerEvent): void => {
       if (drag) {
-        const end = clampToPage(drag.pageDiv, event.clientX, event.clientY)
-        setDragRect(contentRectBetween(container, { x: drag.startX, y: drag.startY }, end))
+        const rect = dragRectOnPage(
+          drag.pageDiv,
+          drag.startX,
+          drag.startY,
+          event.clientX,
+          event.clientY
+        )
+        setDragRect(
+          contentRectBetween(
+            container,
+            { x: rect.left, y: rect.top },
+            { x: rect.right, y: rect.bottom }
+          )
+        )
       }
     }
 
@@ -195,8 +212,8 @@ export function usePdfAnnotateMode({
       const moved = Math.hypot(event.clientX - released.startX, event.clientY - released.startY)
       if (moved >= DRAG_THRESHOLD_PX) {
         finishRegion(viewer, released, event.clientX, event.clientY)
-      } else if (!released.append && event.target instanceof Element) {
-        finishClick(viewer, event.target, event.clientX, event.clientY)
+      } else if (event.target instanceof Element) {
+        finishClick(viewer, event.target, event.clientX, event.clientY, released.append)
       }
     }
 
@@ -286,27 +303,12 @@ export function usePdfAnnotateMode({
 
   const cancel = useCallback((): void => setPending(null), [])
 
-  const viewer = pdfViewerRef.current
-  const container = containerRef.current
-  const project = (point: PdfPagePoint): { x: number; y: number } | null =>
-    viewer && container ? pdfPointToContentPoint(viewer, container, point) : null
-  const projectRegion = (region: PdfRegion): PdfContentRect | null =>
-    viewer && container ? pdfRegionToContentRect(viewer, container, region) : null
-  const markers = annotations.flatMap((annotation, index) => {
-    const position = project(annotation)
-    const regions = annotation.regions.flatMap((region) => projectRegion(region) ?? [])
-    return position ? [{ id: annotation.id, index, ...position, regions }] : []
-  })
-  const pendingRegions = pending?.regions.flatMap((region) => projectRegion(region) ?? []) ?? []
-  // Why: the card opens beside every pending box, so it never covers the text you Shift+drag next.
-  const pendingAnchor = !pending
-    ? null
-    : pendingRegions.length > 0
-      ? {
-          x: Math.max(...pendingRegions.map((rect) => rect.x + rect.width)),
-          y: Math.min(...pendingRegions.map((rect) => rect.y))
-        }
-      : project(pending)
+  const { markers, pendingRegions, pendingAnchor } = projectPdfAnnotations(
+    pdfViewerRef.current,
+    containerRef.current,
+    annotations,
+    pending
+  )
 
   return {
     enabled: context !== null,
