@@ -321,6 +321,47 @@ describe('removeWorktree state cleanup', () => {
     expect(store.getState().editorViewMode).toEqual({ 'file-2': 'changes' })
   })
 
+  it('cleans up PDF annotations and annotate sessions for files in the removed worktree', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
+    const note = (fileKey: string) => ({
+      id: `note-${fileKey}`,
+      fileKey,
+      page: 1,
+      x: 0,
+      y: 0,
+      regions: [],
+      quote: null,
+      comment: 'Tighten this',
+      intent: 'change' as const,
+      createdAt: '2026-09-30T00:00:00.000Z'
+    })
+    const session = { armed: true, draft: { page: 1, x: 0, y: 0, regions: [], quote: null } }
+
+    store.setState({
+      worktreesByRepo: { repo1: [wt] },
+      openFiles: [
+        {
+          id: 'file-1',
+          worktreeId: 'repo1::/path/wt1',
+          filePath: '/path/wt1/paper.pdf',
+          relativePath: 'paper.pdf',
+          language: 'plaintext',
+          isDirty: false,
+          isPreview: false,
+          mode: 'edit' as const
+        }
+      ],
+      pdfAnnotationsByFileKey: { 'file-1': [note('file-1')], 'file-2': [note('file-2')] },
+      pdfAnnotateSessions: { 'file-1': session, 'file-2': session }
+    } as unknown as Partial<AppState>)
+
+    await store.getState().removeWorktree({ id: 'repo1::/path/wt1', executionHostId: null })
+
+    expect(Object.keys(store.getState().pdfAnnotationsByFileKey)).toEqual(['file-2'])
+    expect(Object.keys(store.getState().pdfAnnotateSessions)).toEqual(['file-2'])
+  })
+
   it('cleans up markdownFrontmatterVisible for files in the removed worktree', async () => {
     const store = createTestStore()
     const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
