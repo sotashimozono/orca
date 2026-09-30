@@ -1,5 +1,5 @@
 import { PDFPageView, type PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
-import { clientToContentPoint } from './pdf-text-layer-text'
+import { clientToContentPoint, rectBetweenCorners } from './pdf-text-layer-text'
 
 /** 1-based page; x/y in PDF points from the page's top-left. */
 export type PdfPagePoint = { page: number; x: number; y: number }
@@ -61,9 +61,8 @@ export function pdfRegionToContentRect(
     x: region.right,
     y: region.bottom
   })
-  return topLeft && bottomRight
-    ? { ...topLeft, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y }
-    : null
+  // Why: on a /Rotate 90/180/270 page the PDF top-left corner is not the on-screen one.
+  return topLeft && bottomRight ? rectBetweenCorners(topLeft, bottomRight) : null
 }
 
 /** A client rect over one page as a PDF-point box on that page. */

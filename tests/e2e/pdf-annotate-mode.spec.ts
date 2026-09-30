@@ -147,3 +147,51 @@ test('PDF annotate mode: boxes, paragraph clicks and pins reach the agent prompt
   )
   expect(windows.every((window) => !window.focused)).toBe(true)
 })
+
+test('PDF annotate mode: boxes on a rotated page keep their size', async ({
+  orcaPage,
+  seededRepoPath,
+  registerPostElectronShutdownCleanup
+}, testInfo) => {
+  const filePath = path.join(seededRepoPath, 'pdf-annotate-rotated.pdf')
+  writeFileSync(filePath, createPdfParagraphFixture(undefined, { rotate: 90 }))
+  registerPostElectronShutdownCleanup(async () => rmSync(filePath, { force: true }))
+  await orcaPage.evaluate(() =>
+    window.__store!.getState().updateSettings({ uiLanguage: 'en', theme: 'light' })
+  )
+  await orcaPage.evaluate((filePath) => {
+    const state = window.__store!.getState()
+    state.openFile({
+      filePath,
+      relativePath: 'pdf-annotate-rotated.pdf',
+      worktreeId: state.activeWorktreeId!,
+      language: 'plaintext',
+      mode: 'edit'
+    })
+  }, filePath)
+  const page = orcaPage.locator('.pdfViewer .page[data-page-number="1"]')
+  await expect(page.locator('.textLayer')).toContainText('The first paragraph')
+  await orcaPage.getByRole('button', { name: 'Annotate PDF' }).click()
+
+  // Drag a box across the middle of the rotated page, in screen space.
+  const box = (await page.boundingBox())!
+  const from = { x: box.x + box.width * 0.3, y: box.y + box.height * 0.3 }
+  const to = { x: box.x + box.width * 0.6, y: box.y + box.height * 0.5 }
+  await orcaPage.mouse.move(from.x, from.y)
+  await orcaPage.mouse.down()
+  await orcaPage.mouse.move(to.x, to.y, { steps: 6 })
+  await orcaPage.mouse.up()
+  const card = orcaPage.getByRole('dialog', { name: 'Add PDF annotation' })
+  await card.getByRole('textbox').fill('Rotated box')
+  await card.getByRole('button', { name: /Add/ }).click()
+
+  // The committed outline covers the dragged area instead of collapsing to a negative size.
+  const outline = (await orcaPage.locator('[data-pdf-annotation-region]').first().boundingBox())!
+  expect(Math.abs(outline.x - from.x)).toBeLessThan(3)
+  expect(Math.abs(outline.y - from.y)).toBeLessThan(3)
+  expect(Math.abs(outline.width - (to.x - from.x))).toBeLessThan(3)
+  expect(Math.abs(outline.height - (to.y - from.y))).toBeLessThan(3)
+  const badge = (await orcaPage.locator('[data-pdf-annotation-badge]').first().boundingBox())!
+  expect(Math.abs(badge.x + badge.width / 2 - from.x)).toBeLessThan(3)
+  await orcaPage.screenshot({ path: testInfo.outputPath('rotated-box.png') })
+})

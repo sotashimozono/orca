@@ -35,6 +35,7 @@ export function PdfAnnotationPageLayer({
         marker.regions.map((rect, index) => (
           <div
             key={`${marker.id}-${index}`}
+            data-pdf-annotation-region
             className="absolute rounded-sm border border-annotation-highlight/70 bg-annotation-highlight/10"
             style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
           />
