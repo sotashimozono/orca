@@ -7,6 +7,8 @@ import {
   markHugeRepoWarningDismissed
 } from '@/lib/source-control-huge-repo-warning-dismissals'
 import { getHostedReviewLinkMutationGenerationForTests } from './worktrees'
+import type { PdfAnnotation } from './pdf-annotations'
+import { makeOpenFile } from './store-test-helpers'
 import { makeLineage, makeTerminalTab, makeWorktree } from './worktrees-slice-test-fixtures'
 import {
   createTestStore,
@@ -324,7 +326,7 @@ describe('removeWorktree state cleanup', () => {
   it('cleans up PDF annotations and annotate sessions for files in the removed worktree', async () => {
     const store = createTestStore()
     const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
-    const note = (fileKey: string) => ({
+    const note = (fileKey: string): PdfAnnotation => ({
       id: `note-${fileKey}`,
       fileKey,
       page: 1,
@@ -333,7 +335,7 @@ describe('removeWorktree state cleanup', () => {
       regions: [],
       quote: null,
       comment: 'Tighten this',
-      intent: 'change' as const,
+      intent: 'change',
       createdAt: '2026-09-30T00:00:00.000Z'
     })
     const session = { armed: true, draft: { page: 1, x: 0, y: 0, regions: [], quote: null } }
@@ -341,20 +343,16 @@ describe('removeWorktree state cleanup', () => {
     store.setState({
       worktreesByRepo: { repo1: [wt] },
       openFiles: [
-        {
+        makeOpenFile({
           id: 'file-1',
           worktreeId: 'repo1::/path/wt1',
           filePath: '/path/wt1/paper.pdf',
-          relativePath: 'paper.pdf',
-          language: 'plaintext',
-          isDirty: false,
-          isPreview: false,
-          mode: 'edit' as const
-        }
+          relativePath: 'paper.pdf'
+        })
       ],
       pdfAnnotationsByFileKey: { 'file-1': [note('file-1')], 'file-2': [note('file-2')] },
       pdfAnnotateSessions: { 'file-1': session, 'file-2': session }
-    } as unknown as Partial<AppState>)
+    })
 
     await store.getState().removeWorktree({ id: 'repo1::/path/wt1', executionHostId: null })
 
