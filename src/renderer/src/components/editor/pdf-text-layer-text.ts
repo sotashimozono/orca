@@ -41,6 +41,19 @@ export function dragRectOnPage(
   )
 }
 
+/** The box spanning two opposite corners in either order (rotated pages swap which is top-left). */
+export function rectBetweenCorners(
+  a: { x: number; y: number },
+  b: { x: number; y: number }
+): PdfContentRect {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(a.x - b.x),
+    height: Math.abs(a.y - b.y)
+  }
+}
+
 export function contentRectBetween(
   container: HTMLElement,
   a: { x: number; y: number },

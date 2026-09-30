@@ -40,7 +40,10 @@ function escapePdfText(text: string): string {
   return text.replace(/[\\()]/g, (char) => `\\${char}`)
 }
 
-export function createPdfParagraphFixture(lines = PARAGRAPH_FIXTURE_LINES): Buffer {
+export function createPdfParagraphFixture(
+  lines = PARAGRAPH_FIXTURE_LINES,
+  { rotate = 0 }: { rotate?: 0 | 90 | 180 | 270 } = {}
+): Buffer {
   const stream = `${lines
     .map(
       (line) =>
@@ -51,7 +54,7 @@ export function createPdfParagraphFixture(lines = PARAGRAPH_FIXTURE_LINES): Buff
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [4 0 R] /Count 1 >>',
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 ${PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 ${PAGE_HEIGHT}] /Rotate ${rotate} /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>`,
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}endstream`
   ]
   let pdf = '%PDF-1.4\n'

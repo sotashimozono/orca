@@ -22,6 +22,32 @@ export type PdfAnnotation = {
   createdAt: string
 }
 
+/** Moves annotations to a renamed or re-owned tab's new file id, so unsent notes follow the PDF. */
+export function rekeyPdfAnnotations(
+  byFileKey: Record<string, PdfAnnotation[]> | undefined,
+  migrations: ReadonlyMap<string, string>
+): Record<string, PdfAnnotation[]> {
+  // Why: editor-only stores (tests, partial harnesses) run file-id migrations without this slice.
+  if (!byFileKey) {
+    return {}
+  }
+  let changed = false
+  const next: Record<string, PdfAnnotation[]> = {}
+  for (const [key, annotations] of Object.entries(byFileKey)) {
+    const mapped = migrations.get(key)
+    if (mapped === undefined || mapped === key) {
+      next[key] = [...(next[key] ?? []), ...annotations]
+      continue
+    }
+    changed = true
+    next[mapped] = [
+      ...(next[mapped] ?? []),
+      ...annotations.map((annotation) => ({ ...annotation, fileKey: mapped }))
+    ]
+  }
+  return changed ? next : byFileKey
+}
+
 export type PdfAnnotationsSlice = {
   pdfAnnotationsByFileKey: Record<string, PdfAnnotation[]>
   addPdfAnnotation: (annotation: PdfAnnotation) => void

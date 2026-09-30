@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { snapToWords } from './pdf-text-layer-text'
+import { rectBetweenCorners, snapToWords } from './pdf-text-layer-text'
 
 function pick(text: string, from: number, to: number): string {
   const chars = [...text]
@@ -23,5 +23,15 @@ describe('snapToWords', () => {
 
   it('does not widen CJK, which has no word spaces', () => {
     expect(pick('これは本文です', 2, 4)).toBe('は本')
+  })
+})
+
+describe('rectBetweenCorners', () => {
+  it('gives a positive box whichever corner a rotated page projects first', () => {
+    const box = { x: 10, y: 20, width: 30, height: 40 }
+    expect(rectBetweenCorners({ x: 10, y: 20 }, { x: 40, y: 60 })).toEqual(box)
+    expect(rectBetweenCorners({ x: 40, y: 20 }, { x: 10, y: 60 })).toEqual(box) // 90°
+    expect(rectBetweenCorners({ x: 40, y: 60 }, { x: 10, y: 20 })).toEqual(box) // 180°
+    expect(rectBetweenCorners({ x: 10, y: 60 }, { x: 40, y: 20 })).toEqual(box) // 270°
   })
 })

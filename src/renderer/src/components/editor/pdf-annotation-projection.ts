@@ -23,8 +23,9 @@ export function projectPdfAnnotations(
   const projectRegion = (region: PdfRegion): PdfContentRect | null =>
     viewer && container ? pdfRegionToContentRect(viewer, container, region) : null
   const markers = annotations.flatMap((annotation, index) => {
-    const position = project(annotation)
     const regions = annotation.regions.flatMap((region) => projectRegion(region) ?? [])
+    // A boxed note's badge sits on its first box's on-screen corner, which rotation can move.
+    const position = regions[0] ? { x: regions[0].x, y: regions[0].y } : project(annotation)
     return position ? [{ id: annotation.id, index, ...position, regions }] : []
   })
   const pendingRegions = pending?.regions.flatMap((region) => projectRegion(region) ?? []) ?? []
