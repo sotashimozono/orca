@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import { useAppStore } from '@/store'
-import type { PdfAnnotation, PdfRegion } from '@/store/slices/pdf-annotations'
+import { createPdfAnnotation, type PdfAnnotation } from '@/store/slices/pdf-annotations'
 import type { BrowserAnnotationIntent } from '../../../../shared/browser-grab-types'
-import { pdfPagePointAt, pdfRegionFromClientRect, type PdfPagePoint } from './pdf-page-geometry'
+import { pdfPagePointAt, pdfRegionFromClientRect } from './pdf-page-geometry'
 import { projectPdfAnnotations } from './pdf-annotation-projection'
 import {
   dragRectOnPage,
@@ -25,12 +25,6 @@ export type PdfAnnotationContext = {
 
 export type { PdfContentRect }
 
-type PendingPdfAnnotation = PdfPagePoint & {
-  fileKey: string
-  regions: PdfRegion[]
-  quote: string | null
-}
-
 type Drag = { pageDiv: HTMLElement; startX: number; startY: number; append: boolean }
 
 const EMPTY_PDF_ANNOTATIONS: PdfAnnotation[] = []
@@ -50,12 +44,13 @@ export function usePdfAnnotateMode({
   pdfViewerRef: RefObject<PDFViewer | null>
 }) {
   const fileKey = context?.fileKey ?? null
-  // Why: the viewer is reused across PDF tabs, so mode and draft are tagged with their file
-  // and read as off/empty once another file is shown, never saved under the wrong one.
-  const [armedFileKey, setArmedFileKey] = useState<string | null>(null)
-  const [pendingDraft, setPending] = useState<PendingPdfAnnotation | null>(null)
-  const active = fileKey !== null && armedFileKey === fileKey
-  const pending = pendingDraft?.fileKey === fileKey ? pendingDraft : null
+  // Why: mode and draft live in the store per file: the viewer is reused across PDF tabs, and
+  // a rename re-keys them with the file's annotations instead of stranding a half-written comment.
+  const session = useAppStore((s) => (fileKey ? s.pdfAnnotateSessions[fileKey] : undefined))
+  const active = session?.armed === true
+  const pending = session?.draft ?? null
+  const setPdfAnnotateArmed = useAppStore((s) => s.setPdfAnnotateArmed)
+  const setPdfAnnotationDraft = useAppStore((s) => s.setPdfAnnotationDraft)
   const [hoverRect, setHoverRect] = useState<PdfContentRect | null>(null)
   const [dragRect, setDragRect] = useState<PdfContentRect | null>(null)
   // The non-scrolling wrapper the comment card portals into and clamps against.
@@ -83,11 +78,12 @@ export function usePdfAnnotateMode({
   }, [viewerDivRef])
 
   const stop = useCallback((): void => {
-    setArmedFileKey(null)
-    setPending(null)
+    if (fileKey) {
+      setPdfAnnotateArmed(fileKey, false)
+    }
     setHoverRect(null)
     setDragRect(null)
-  }, [])
+  }, [fileKey, setPdfAnnotateArmed])
 
   useEffect(() => {
     const container = containerRef.current
@@ -112,10 +108,20 @@ export function usePdfAnnotateMode({
       const previous = append ? pendingRef.current : null
       const regions = [...(previous?.regions ?? []), region]
       if (previous) {
-        setPending({ ...previous, regions, quote: joinQuotes(previous.quote, quote) })
+        setPdfAnnotationDraft(key, {
+          ...previous,
+          regions,
+          quote: joinQuotes(previous.quote, quote)
+        })
         return
       }
-      setPending({ fileKey: key, page: region.page, x: region.left, y: region.top, regions, quote })
+      setPdfAnnotationDraft(key, {
+        page: region.page,
+        x: region.left,
+        y: region.top,
+        regions,
+        quote
+      })
     }
 
     // A click on text picks its whole paragraph, like Design Mode picks an element; elsewhere it pins.
@@ -133,7 +139,7 @@ export function usePdfAnnotateMode({
       }
       const point = append ? null : pdfPagePointAt(viewer, target, x, y)
       if (point) {
-        setPending({ ...point, fileKey: key, regions: [], quote: null })
+        setPdfAnnotationDraft(key, { ...point, regions: [], quote: null })
       }
     }
 
@@ -268,40 +274,35 @@ export function usePdfAnnotateMode({
       window.removeEventListener('keydown', handleKeyDown, true)
       endDrag()
     }
-  }, [active, fileKey, containerRef, pdfViewerRef, stop])
+  }, [active, fileKey, containerRef, pdfViewerRef, setPdfAnnotationDraft, stop])
 
   const toggle = useCallback((): void => {
     if (active) {
       stop()
     } else {
-      setArmedFileKey(fileKey)
+      if (fileKey) {
+        setPdfAnnotateArmed(fileKey, true)
+      }
     }
-  }, [active, fileKey, stop])
+  }, [active, fileKey, setPdfAnnotateArmed, stop])
 
   const add = useCallback(
     (comment: string, intent: BrowserAnnotationIntent): void => {
       if (!pending || !fileKey) {
         return
       }
-      addPdfAnnotation({
-        id: `pdf-annotation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        fileKey,
-        page: pending.page,
-        x: pending.x,
-        y: pending.y,
-        regions: pending.regions,
-        quote: pending.quote,
-        comment,
-        intent,
-        createdAt: new Date().toISOString()
-      })
+      addPdfAnnotation(createPdfAnnotation(fileKey, pending, comment, intent))
       // Stay armed after adding, as Design Mode rearms its picker.
-      setPending(null)
+      setPdfAnnotationDraft(fileKey, null)
     },
-    [addPdfAnnotation, fileKey, pending]
+    [addPdfAnnotation, fileKey, pending, setPdfAnnotationDraft]
   )
 
-  const cancel = useCallback((): void => setPending(null), [])
+  const cancel = useCallback((): void => {
+    if (fileKey) {
+      setPdfAnnotationDraft(fileKey, null)
+    }
+  }, [fileKey, setPdfAnnotationDraft])
 
   const { markers, pendingRegions, pendingAnchor } = projectPdfAnnotations(
     pdfViewerRef.current,

@@ -37,8 +37,8 @@ export function usePdfAnnotationSend(
   )
 
   const handleSentToAgent = useCallback((): void => {
-    removeDeliveredPdfAnnotations(fileKey, annotations)
-  }, [annotations, fileKey, removeDeliveredPdfAnnotations])
+    removeDeliveredPdfAnnotations(annotations)
+  }, [annotations, removeDeliveredPdfAnnotations])
 
   const handleSendOpenChange = useCallback(
     (open: boolean): void => {

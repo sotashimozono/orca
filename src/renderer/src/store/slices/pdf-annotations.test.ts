@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PdfAnnotation } from './pdf-annotations'
+import { rekeyPdfAnnotationState } from './pdf-annotations'
 import { createTestStore } from './store-test-helpers'
 
 vi.mock('@/runtime/close-mirrored-editor-tab', () => ({
@@ -29,7 +30,7 @@ describe('pdf annotations slice', () => {
     const delivered = store.getState().pdfAnnotationsByFileKey['/repo/a.pdf']
     store.getState().addPdfAnnotation(annotation('/repo/a.pdf', 'a2'))
 
-    store.getState().removeDeliveredPdfAnnotations('/repo/a.pdf', delivered)
+    store.getState().removeDeliveredPdfAnnotations(delivered)
 
     expect(store.getState().pdfAnnotationsByFileKey['/repo/a.pdf']?.map((a) => a.id)).toEqual([
       'a2'
@@ -54,5 +55,50 @@ describe('pdf annotations slice', () => {
     await store.getState().closeFile(fileA.id)
 
     expect(Object.keys(store.getState().pdfAnnotationsByFileKey)).toEqual([fileB.id])
+  })
+
+  it('clears delivered notes a rename re-keyed mid-send, but keeps ones edited after sending', () => {
+    const store = createTestStore()
+    store.getState().addPdfAnnotation(annotation('/repo/a.pdf', 'a1'))
+    store.getState().addPdfAnnotation(annotation('/repo/a.pdf', 'a2'))
+    const delivered = store.getState().pdfAnnotationsByFileKey['/repo/a.pdf']
+    // The rename lands while the send is in flight: notes move to the new id as clones.
+    store.setState((s) => rekeyPdfAnnotationState(s, new Map([['/repo/a.pdf', '/repo/b.pdf']])))
+    store
+      .getState()
+      .updatePdfAnnotation('/repo/b.pdf', 'a2', { comment: 'edited', intent: 'change' })
+
+    store.getState().removeDeliveredPdfAnnotations(delivered)
+
+    expect(store.getState().pdfAnnotationsByFileKey).toEqual({
+      '/repo/b.pdf': [
+        expect.objectContaining({ id: 'a2', fileKey: '/repo/b.pdf', comment: 'edited' })
+      ]
+    })
+  })
+
+  it('moves the armed mode and a half-written draft with a rename', () => {
+    const store = createTestStore()
+    store.getState().setPdfAnnotateArmed('/repo/a.pdf', true)
+    const draft = { page: 2, x: 10, y: 20, regions: [], quote: 'text' }
+    store.getState().setPdfAnnotationDraft('/repo/a.pdf', draft)
+
+    store.setState((s) => rekeyPdfAnnotationState(s, new Map([['/repo/a.pdf', '/repo/b.pdf']])))
+
+    expect(store.getState().pdfAnnotateSessions).toEqual({
+      '/repo/b.pdf': { armed: true, draft }
+    })
+  })
+
+  it('drops the draft and the session when the mode is turned off', () => {
+    const store = createTestStore()
+    store.getState().setPdfAnnotateArmed('/repo/a.pdf', true)
+    store
+      .getState()
+      .setPdfAnnotationDraft('/repo/a.pdf', { page: 1, x: 0, y: 0, regions: [], quote: null })
+
+    store.getState().setPdfAnnotateArmed('/repo/a.pdf', false)
+
+    expect(store.getState().pdfAnnotateSessions).toEqual({})
   })
 })
