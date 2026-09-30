@@ -6,6 +6,7 @@ import type { BrowserAnnotationIntent } from '../../../../shared/browser-grab-ty
 import {
   pdfPagePointAt,
   pdfPointToContentPoint,
+  pdfRegionFromClientRect,
   pdfRegionToContentRect,
   type PdfPagePoint
 } from './pdf-page-geometry'
@@ -17,6 +18,7 @@ import {
   textInClientRect,
   type PdfContentRect
 } from './pdf-text-layer-text'
+import { isAnnotateModeExitKey } from './pdf-annotate-exit-key'
 
 /** Where a PDF's annotations belong; absent for diff/conflict viewers, which cannot annotate. */
 export type PdfAnnotationContext = {
@@ -28,6 +30,7 @@ export type PdfAnnotationContext = {
 export type { PdfContentRect }
 
 type PendingPdfAnnotation = PdfPagePoint & {
+  fileKey: string
   regions: PdfRegion[]
   quote: string | null
 }
@@ -50,8 +53,13 @@ export function usePdfAnnotateMode({
   viewerDivRef: RefObject<HTMLDivElement | null>
   pdfViewerRef: RefObject<PDFViewer | null>
 }) {
-  const [active, setActive] = useState(false)
-  const [pending, setPending] = useState<PendingPdfAnnotation | null>(null)
+  const fileKey = context?.fileKey ?? null
+  // Why: the viewer is reused across PDF tabs, so mode and draft are tagged with their file
+  // and read as off/empty once another file is shown, never saved under the wrong one.
+  const [armedFileKey, setArmedFileKey] = useState<string | null>(null)
+  const [pendingDraft, setPending] = useState<PendingPdfAnnotation | null>(null)
+  const active = fileKey !== null && armedFileKey === fileKey
+  const pending = pendingDraft?.fileKey === fileKey ? pendingDraft : null
   const [hoverRect, setHoverRect] = useState<PdfContentRect | null>(null)
   const [dragRect, setDragRect] = useState<PdfContentRect | null>(null)
   // The non-scrolling wrapper the comment card portals into and clamps against.
@@ -59,7 +67,6 @@ export function usePdfAnnotateMode({
   // Re-renders on zoom/first layout so overlays re-project from live pdf.js geometry.
   const [, setLayoutVersion] = useState(0)
   const pendingRef = useRef(pending)
-  const fileKey = context?.fileKey ?? null
   const annotations = useAppStore((s) =>
     fileKey ? (s.pdfAnnotationsByFileKey[fileKey] ?? EMPTY_PDF_ANNOTATIONS) : EMPTY_PDF_ANNOTATIONS
   )
@@ -80,7 +87,7 @@ export function usePdfAnnotateMode({
   }, [viewerDivRef])
 
   const stop = useCallback((): void => {
-    setActive(false)
+    setArmedFileKey(null)
     setPending(null)
     setHoverRect(null)
     setDragRect(null)
@@ -88,7 +95,8 @@ export function usePdfAnnotateMode({
 
   useEffect(() => {
     const container = containerRef.current
-    if (!active || !container) {
+    const key = fileKey
+    if (!active || !container || !key) {
       return
     }
     let drag: Drag | null = null
@@ -104,7 +112,7 @@ export function usePdfAnnotateMode({
         return
       }
       const quote = target.closest(TEXT_RUN_SELECTOR)?.textContent?.trim() || null
-      setPending({ ...point, regions: [], quote })
+      setPending({ ...point, fileKey: key, regions: [], quote })
     }
 
     const finishRegion = (viewer: PDFViewer, released: Drag, endX: number, endY: number): void => {
@@ -115,22 +123,9 @@ export function usePdfAnnotateMode({
         Math.abs(end.x - released.startX),
         Math.abs(end.y - released.startY)
       )
-      const topLeft = pdfPagePointAt(viewer, released.pageDiv, clientRect.left, clientRect.top)
-      const bottomRight = pdfPagePointAt(
-        viewer,
-        released.pageDiv,
-        clientRect.right,
-        clientRect.bottom
-      )
-      if (!topLeft || !bottomRight) {
+      const region = pdfRegionFromClientRect(viewer, released.pageDiv, clientRect)
+      if (!region) {
         return
-      }
-      const region: PdfRegion = {
-        page: topLeft.page,
-        left: Math.min(topLeft.x, bottomRight.x),
-        top: Math.min(topLeft.y, bottomRight.y),
-        right: Math.max(topLeft.x, bottomRight.x),
-        bottom: Math.max(topLeft.y, bottomRight.y)
       }
       const quote = textInClientRect(released.pageDiv, clientRect)
       const previous = released.append ? pendingRef.current : null
@@ -140,6 +135,7 @@ export function usePdfAnnotateMode({
         return
       }
       setPending({
+        fileKey: key,
         page: region.page,
         x: region.left,
         y: region.top,
@@ -148,16 +144,22 @@ export function usePdfAnnotateMode({
       })
     }
 
-    const handlePointerMove = (event: PointerEvent): void => {
+    let hoveredRun: Element | null = null
+    const handleHover = (event: PointerEvent): void => {
       if (drag) {
-        const end = clampToPage(drag.pageDiv, event.clientX, event.clientY)
-        setDragRect(contentRectBetween(container, { x: drag.startX, y: drag.startY }, end))
         return
       }
-      const run = event.target instanceof Element ? event.target.closest(TEXT_RUN_SELECTOR) : null
+      const target =
+        event.target instanceof Element ? event.target.closest(TEXT_RUN_SELECTOR) : null
+      const run = target && container.contains(target) ? target : null
+      // Why: skip re-rendering the viewer for moves that stay over the same run.
+      if (run === hoveredRun) {
+        return
+      }
+      hoveredRun = run
       const box = run?.getBoundingClientRect()
       setHoverRect(
-        box && container.contains(run)
+        box
           ? contentRectBetween(
               container,
               { x: box.left, y: box.top },
@@ -167,12 +169,25 @@ export function usePdfAnnotateMode({
       )
     }
 
-    const handlePointerUp = (event: PointerEvent): void => {
+    const handleDragMove = (event: PointerEvent): void => {
+      if (drag) {
+        const end = clampToPage(drag.pageDiv, event.clientX, event.clientY)
+        setDragRect(contentRectBetween(container, { x: drag.startX, y: drag.startY }, end))
+      }
+    }
+
+    const endDrag = (): Drag | null => {
       const released = drag
       drag = null
       setDragRect(null)
-      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointermove', handleDragMove)
       window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', endDrag)
+      return released
+    }
+
+    const handlePointerUp = (event: PointerEvent): void => {
+      const released = endDrag()
       const viewer = pdfViewerRef.current
       if (!released || !viewer) {
         return
@@ -203,10 +218,14 @@ export function usePdfAnnotateMode({
       }
       // Why: pdf.js text selection scatters over math; a box drag replaces it while annotating.
       event.preventDefault()
+      endDrag()
       drag = { pageDiv, startX: event.clientX, startY: event.clientY, append }
+      hoveredRun = null
       setHoverRect(null)
-      window.addEventListener('pointermove', handlePointerMove)
+      window.addEventListener('pointermove', handleDragMove)
       window.addEventListener('pointerup', handlePointerUp)
+      // An OS gesture or window switch cancels the pointer; drop the half-drawn box.
+      window.addEventListener('pointercancel', endDrag)
     }
 
     // Why: a link click while annotating would navigate away from the spot being commented on.
@@ -217,31 +236,30 @@ export function usePdfAnnotateMode({
       }
     }
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && !pendingRef.current) {
+      if (!pendingRef.current && isAnnotateModeExitKey(event, container)) {
         stop()
       }
     }
     container.addEventListener('pointerdown', handlePointerDown)
-    container.addEventListener('pointermove', handlePointerMove)
+    container.addEventListener('pointermove', handleHover)
     container.addEventListener('click', handleClickCapture, true)
-    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', handleKeyDown, true)
     return () => {
       container.removeEventListener('pointerdown', handlePointerDown)
-      container.removeEventListener('pointermove', handlePointerMove)
+      container.removeEventListener('pointermove', handleHover)
       container.removeEventListener('click', handleClickCapture, true)
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', handlePointerUp)
-      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keydown', handleKeyDown, true)
+      endDrag()
     }
-  }, [active, containerRef, pdfViewerRef, stop])
+  }, [active, fileKey, containerRef, pdfViewerRef, stop])
 
   const toggle = useCallback((): void => {
     if (active) {
       stop()
     } else {
-      setActive(true)
+      setArmedFileKey(fileKey)
     }
-  }, [active, stop])
+  }, [active, fileKey, stop])
 
   const add = useCallback(
     (comment: string, intent: BrowserAnnotationIntent): void => {

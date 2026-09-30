@@ -1,7 +1,18 @@
-import { clientToContentPoint } from './pdf-page-geometry'
-
 /** A rect in the scroll container's content box, so overlays scroll with the pages. */
 export type PdfContentRect = { x: number; y: number; width: number; height: number }
+
+/** Client point inside the scroll container's content box, so overlays scroll with the pages. */
+export function clientToContentPoint(
+  container: HTMLElement,
+  clientX: number,
+  clientY: number
+): { x: number; y: number } {
+  const rect = container.getBoundingClientRect()
+  return {
+    x: clientX - rect.left + container.scrollLeft,
+    y: clientY - rect.top + container.scrollTop
+  }
+}
 
 /** pdf.js text-layer runs; markedContent spans are structural wrappers without their own text. */
 export const TEXT_RUN_SELECTOR = '.textLayer span:not(.markedContent)'
@@ -29,21 +40,28 @@ function coversGlyph(glyph: DOMRect, rect: DOMRect): boolean {
 // Latin-script word characters only; CJK has no spaces, so snapping would swallow whole sentences.
 const WORD_CHAR_RE = /[A-Za-z0-9\u00C0-\u024F]/
 
-/** Widens each picked span to whole words where the box edge cut a word in half. */
-function snapToWords(text: string, picked: boolean[]): string {
+/**
+ * Widens each picked span to whole words where the box edge cut a word in half.
+ * `chars` are code points, so astral glyphs (e.g. math italic 𝑥) keep indexes aligned.
+ */
+export function snapToWords(chars: readonly string[], picked: readonly boolean[]): string {
   const snapped = [...picked]
-  for (let index = 0; index < text.length; index += 1) {
-    if (!picked[index] || !WORD_CHAR_RE.test(text[index])) {
-      continue
+  chars.forEach((char, index) => {
+    if (!picked[index] || !WORD_CHAR_RE.test(char)) {
+      return
     }
-    for (let left = index - 1; left >= 0 && WORD_CHAR_RE.test(text[left]); left -= 1) {
+    for (let left = index - 1; left >= 0 && WORD_CHAR_RE.test(chars[left]); left -= 1) {
       snapped[left] = true
     }
-    for (let right = index + 1; right < text.length && WORD_CHAR_RE.test(text[right]); right += 1) {
+    for (
+      let right = index + 1;
+      right < chars.length && WORD_CHAR_RE.test(chars[right]);
+      right += 1
+    ) {
       snapped[right] = true
     }
-  }
-  return [...text].filter((_, index) => snapped[index]).join('')
+  })
+  return chars.filter((_, index) => snapped[index]).join('')
 }
 
 // Why: a run is often a whole line, so a box around one word must be cut per character.
@@ -54,13 +72,16 @@ function runTextInRect(run: Element, rect: DOMRect): string {
     return coversGlyph(run.getBoundingClientRect(), rect) ? text : ''
   }
   const range = document.createRange()
+  const chars = [...text]
   const picked: boolean[] = []
-  for (let index = 0; index < text.length; index += 1) {
-    range.setStart(node, index)
-    range.setEnd(node, index + 1)
+  let offset = 0
+  for (const char of chars) {
+    range.setStart(node, offset)
+    range.setEnd(node, offset + char.length)
     picked.push(coversGlyph(range.getBoundingClientRect(), rect))
+    offset += char.length
   }
-  return snapToWords(text, picked)
+  return snapToWords(chars, picked)
 }
 
 /** Text under a client rect, in text-layer order. Math may come out garbled. */

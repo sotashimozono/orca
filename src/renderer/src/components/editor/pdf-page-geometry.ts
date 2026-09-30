@@ -1,4 +1,5 @@
 import { PDFPageView, type PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
+import { clientToContentPoint } from './pdf-text-layer-text'
 
 /** 1-based page; x/y in PDF points from the page's top-left. */
 export type PdfPagePoint = { page: number; x: number; y: number }
@@ -44,18 +45,6 @@ export function pdfPointToContentPoint(
   return clientToContentPoint(container, pageRect.left + Number(vx), pageRect.top + Number(vy))
 }
 
-export function clientToContentPoint(
-  container: HTMLElement,
-  clientX: number,
-  clientY: number
-): { x: number; y: number } {
-  const rect = container.getBoundingClientRect()
-  return {
-    x: clientX - rect.left + container.scrollLeft,
-    y: clientY - rect.top + container.scrollTop
-  }
-}
-
 /** A PDF-point box on one page, projected into the scroll container's content box. */
 export function pdfRegionToContentRect(
   viewer: PDFViewer,
@@ -75,4 +64,24 @@ export function pdfRegionToContentRect(
   return topLeft && bottomRight
     ? { ...topLeft, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y }
     : null
+}
+
+/** A client rect over one page as a PDF-point box on that page. */
+export function pdfRegionFromClientRect(
+  viewer: PDFViewer,
+  pageDiv: Element,
+  rect: DOMRect
+): { page: number; left: number; top: number; right: number; bottom: number } | null {
+  const a = pdfPagePointAt(viewer, pageDiv, rect.left, rect.top)
+  const b = pdfPagePointAt(viewer, pageDiv, rect.right, rect.bottom)
+  if (!a || !b) {
+    return null
+  }
+  return {
+    page: a.page,
+    left: Math.min(a.x, b.x),
+    top: Math.min(a.y, b.y),
+    right: Math.max(a.x, b.x),
+    bottom: Math.max(a.y, b.y)
+  }
 }

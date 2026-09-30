@@ -51,7 +51,7 @@ export function PdfAnnotationPageLayer({
         <div
           key={marker.id}
           data-pdf-annotation-badge
-          className="absolute flex size-6 items-center justify-center rounded-full border border-background bg-primary text-[11px] font-semibold text-primary-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)] select-none"
+          className="absolute flex size-6 items-center justify-center rounded-full border border-background bg-primary text-[11px] font-semibold text-primary-foreground shadow-xs select-none"
           style={
             marker.regions.length > 0
               ? { left: marker.x - 12, top: marker.y - 12 }
