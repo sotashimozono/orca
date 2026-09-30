@@ -72,7 +72,7 @@ export function PdfAnnotationPageLayer({
           beside
           hint={translate(
             'auto.components.editor.PdfViewer.pdfAnnotateAddRegionHint',
-            'Shift+drag to add another area to this comment.'
+            'Shift+click a paragraph or Shift+drag to add another area to this comment.'
           )}
           onPointerDownOutside={(event) => {
             if (event.detail.originalEvent.shiftKey) {
