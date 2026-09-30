@@ -26,7 +26,7 @@ function annotationElementLabel(payload: BrowserGrabPayload): string {
 
 export const BROWSER_ANNOTATION_INLINE_TEXT_MAX_LENGTH = 2048
 
-function inlineText(
+export function inlineText(
   content: string,
   maxLength = BROWSER_ANNOTATION_INLINE_TEXT_MAX_LENGTH
 ): string {
