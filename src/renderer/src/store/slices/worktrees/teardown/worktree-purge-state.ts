@@ -232,6 +232,7 @@ export function buildWorktreePurgeState(
     editorCursorLine: omitByFileId(s.editorCursorLine),
     editorViewMode: omitByFileId(s.editorViewMode),
     pdfAnnotationsByFileKey: omitByFileId(s.pdfAnnotationsByFileKey),
+    pdfAnnotateSessions: omitByFileId(s.pdfAnnotateSessions),
     // Why: keyed by worktreeId; re-keyed on rename but missed by both removal paths (editor-undo / Cmd+Shift+T snapshots).
     recentlyClosedEditorTabsByWorktree: omitByWorktree(s.recentlyClosedEditorTabsByWorktree),
     recentlyClosedTerminalTabsByWorktree: omitByWorktree(s.recentlyClosedTerminalTabsByWorktree),

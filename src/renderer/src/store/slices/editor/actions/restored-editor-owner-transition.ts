@@ -9,7 +9,7 @@ import {
   removeTabIdsFromGroup,
   rekeyFileIdRecord
 } from '../file-ids/open-file-path-rekey'
-import { rekeyPdfAnnotations } from '../../pdf-annotations'
+import { rekeyPdfAnnotationState } from '../../pdf-annotations'
 import type {
   RestoredEditorOwnerMigration,
   RestoredEditorOwnerResult
@@ -208,7 +208,7 @@ export function buildRestoredEditorOwnerTransition(
         markdownViewMode: rekeyFileIdRecord(s.markdownViewMode, migrations),
         markdownRichModeSizeOverride: rekeyFileIdRecord(s.markdownRichModeSizeOverride, migrations),
         editorViewMode: rekeyFileIdRecord(s.editorViewMode, migrations),
-        pdfAnnotationsByFileKey: rekeyPdfAnnotations(s.pdfAnnotationsByFileKey, migrations),
+        ...rekeyPdfAnnotationState(s, migrations),
         markdownFrontmatterVisible: rekeyFileIdRecord(s.markdownFrontmatterVisible, migrations),
         markdownTableOfContentsVisible: rekeyFileIdRecord(
           s.markdownTableOfContentsVisible,
