@@ -77,6 +77,23 @@ export function usePdfAnnotationSend(
     copyTimerRef.current = setTimeout(() => setCopied(false), 1400)
   }, [prompt])
 
+  const handleClear = useCallback((): void => {
+    clearTimeout(copyTimerRef.current)
+    setCopied(false)
+    clearPdfAnnotations(fileKey)
+  }, [clearPdfAnnotations, fileKey])
+
+  const handleDelete = useCallback(
+    (annotationId: string): void => deletePdfAnnotation(fileKey, annotationId),
+    [deletePdfAnnotation, fileKey]
+  )
+
+  const handleUpdate = useCallback(
+    (annotationId: string, comment: string, intent: BrowserAnnotationIntent): void =>
+      updatePdfAnnotation(fileKey, annotationId, { comment, intent }),
+    [fileKey, updatePdfAnnotation]
+  )
+
   // Why: named to match the shared Design Mode tray's props, so the tray is spread as-is.
   return {
     browserAnnotations: annotations,
@@ -88,13 +105,8 @@ export function usePdfAnnotationSend(
     handleBrowserAnnotationsSentToAgent: handleSentToAgent,
     handleCopyBrowserAnnotations: handleCopy,
     browserAnnotationsCopied: copied,
-    handleClearBrowserAnnotations: () => clearPdfAnnotations(fileKey),
-    handleDeleteBrowserAnnotation: (annotationId: string) =>
-      deletePdfAnnotation(fileKey, annotationId),
-    handleUpdateBrowserAnnotation: (
-      annotationId: string,
-      comment: string,
-      intent: BrowserAnnotationIntent
-    ) => updatePdfAnnotation(fileKey, annotationId, { comment, intent })
+    handleClearBrowserAnnotations: handleClear,
+    handleDeleteBrowserAnnotation: handleDelete,
+    handleUpdateBrowserAnnotation: handleUpdate
   }
 }

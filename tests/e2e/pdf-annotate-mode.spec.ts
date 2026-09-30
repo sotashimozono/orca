@@ -114,7 +114,10 @@ test('PDF annotate mode: box, Shift+drag areas and pins reach the agent prompt',
   await dragPdfBox(orcaPage, [55, 112, 260, 138])
   await expect(card).toHaveCSS('opacity', '1')
   await shot('04-dark-pending')
-  await card.getByRole('button', { name: 'Cancel' }).click()
+  // Escape on the open card only dismisses the card; the mode stays armed.
+  await orcaPage.keyboard.press('Escape')
+  await expect(card).toHaveCount(0)
+  await expect(annotate).toHaveAttribute('aria-pressed', 'true')
 
   await orcaPage.keyboard.press('Escape')
   await expect(annotate).toHaveAttribute('aria-pressed', 'false')

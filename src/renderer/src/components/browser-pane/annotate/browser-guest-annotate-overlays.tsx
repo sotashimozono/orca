@@ -19,6 +19,7 @@ import {
 } from '../describe-page/browser-annotation-geometry'
 import { BrowserPageAnnotationTray } from './browser-page-annotation-tray'
 import { browserAnnotationMatchesPageUrl } from './browser-annotation-page-url'
+import { browserAnnotationTitle } from './browser-annotation-output'
 import { BrowserPageGrabToast } from './browser-page-grab-toast'
 import { PendingBrowserAnnotationCard } from './pending-browser-annotation-card'
 import type { useBrowserPageAnnotationSend } from './use-browser-page-annotation-send'
@@ -98,11 +99,7 @@ export function BrowserGuestAnnotateOverlays({
         : null}
       {pendingAnnotationPayload ? (
         <PendingBrowserAnnotationCard
-          title={
-            pendingAnnotationPayload.target.accessibility.accessibleName ||
-            pendingAnnotationPayload.target.textSnippet ||
-            pendingAnnotationPayload.target.tagName
-          }
+          title={browserAnnotationTitle(pendingAnnotationPayload)}
           subtitle={pendingAnnotationPayload.target.selector}
           anchor={getBrowserOverlayAnchor(
             pendingAnnotationPayload,
@@ -118,11 +115,7 @@ export function BrowserGuestAnnotateOverlays({
       {browserAnnotations.length > 0 && browserAnnotationTrayOpen ? (
         <BrowserPageAnnotationTray
           browserAnnotations={browserAnnotations}
-          getAnnotationTitle={(annotation) =>
-            annotation.payload.target.accessibility.accessibleName ||
-            annotation.payload.target.textSnippet ||
-            annotation.payload.target.tagName
-          }
+          getAnnotationTitle={(annotation) => browserAnnotationTitle(annotation.payload)}
           getAnnotationElsewhereLabel={(annotation) =>
             currentUrl !== undefined &&
             !browserAnnotationMatchesPageUrl(annotation.payload.page.sanitizedUrl, currentUrl)
