@@ -369,24 +369,6 @@ export default function PdfViewer({
 
   const zoomPercent = Math.round(scale * 100)
 
-  if (pdfError) {
-    return (
-      <div className="flex h-full flex-col">
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-muted/20 p-8 text-sm text-muted-foreground">
-          <ImageIcon size={40} />
-          <div>{pdfError}</div>
-          <div className="max-w-md break-all text-center text-xs">{filename}</div>
-        </div>
-        <div className="flex items-center gap-4 border-t px-4 py-2 text-xs text-muted-foreground">
-          <span className="min-w-0 truncate" title={filename}>
-            {filename}
-          </span>
-          <span>{translate('auto.components.editor.PdfViewer.3e98d500d2', 'PDF preview')}</span>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -409,6 +391,15 @@ export default function PdfViewer({
             <div ref={viewerDivRef} className="pdfViewer" />
           </div>
         </div>
+        {/* Why: an overlay, not a replacement — the load effect needs the viewer
+            container mounted to retry when the file is rewritten (e.g. a LaTeX build). */}
+        {pdfError ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-8 text-sm text-muted-foreground">
+            <ImageIcon size={40} />
+            <div>{pdfError}</div>
+            <div className="max-w-md break-all text-center text-xs">{filename}</div>
+          </div>
+        ) : null}
       </div>
       <div className="flex items-center gap-4 border-t px-4 py-2 text-xs text-muted-foreground">
         <div className="flex items-center gap-1">
