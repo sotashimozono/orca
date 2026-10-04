@@ -48,11 +48,13 @@ test('PDF preview survives a rebuild that is read half-written', async ({
   await expect(pages).toHaveCount(3)
 
   // The next build reads half-written again: the last good PDF stays on screen.
+  const firstPage = pages.first().locator('.textLayer')
   writeFileSync(filePath, halfWritten)
   await settleAndCapture(orcaPage, testInfo, '2-rebuild-in-progress')
   await expect(error).toBeHidden()
-  await expect(pages).toHaveCount(3)
+  await expect(firstPage).toContainText('PDF search fixture - page 1')
 
-  writeFileSync(filePath, finished)
-  await expect(pages).toHaveCount(3)
+  // A distinct finished build, so the swap to the new document is observable.
+  writeFileSync(filePath, createPdfFindFixture({ title: 'Next build' }))
+  await expect(firstPage).toContainText('Next build - page 1')
 })

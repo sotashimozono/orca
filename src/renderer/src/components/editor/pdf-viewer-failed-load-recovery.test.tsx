@@ -112,4 +112,28 @@ describe('PdfViewer when the file is rewritten', () => {
     await waitFor(() => expect(view.queryByText(ERROR_TEXT)).toBeTruthy())
     expect(shownDocuments.at(-1)).toBeNull()
   })
+
+  it('keeps the document when its own file reads empty mid-rebuild', async () => {
+    const previous = { name: 'previous build' }
+    getDocument.mockImplementationOnce(() => loadingTask(previous))
+    const view = render(<PdfViewer content={btoa('%PDF v1')} filePath="out/main.pdf" />)
+    await waitFor(() => expect(shownDocuments.at(-1)).toBe(previous))
+
+    view.rerender(<PdfViewer content="" filePath="out/main.pdf" />)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(shownDocuments.at(-1)).toBe(previous)
+    expect(view.queryByText(ERROR_TEXT)).toBeNull()
+  })
+
+  it('does not keep another file on screen when the newly opened one is empty', async () => {
+    getDocument.mockImplementationOnce(() => loadingTask({ name: 'a.pdf' }))
+    const view = render(<PdfViewer content={btoa('%PDF a')} filePath="a.pdf" />)
+    await waitFor(() => expect(shownDocuments.length).toBe(1))
+
+    view.rerender(<PdfViewer content="" filePath="empty.pdf" />)
+
+    await waitFor(() => expect(shownDocuments.at(-1)).toBeNull())
+    expect(view.queryByText(ERROR_TEXT)).toBeNull()
+  })
 })

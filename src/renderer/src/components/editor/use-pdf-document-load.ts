@@ -46,6 +46,12 @@ export function usePdfDocumentLoad(
 
   useEffect(() => {
     if (!cleanedContent) {
+      // Why: an empty read of the same file is a rebuild caught mid-truncation, so keep it;
+      // for a different (e.g. zero-byte) file, show nothing rather than the previous file's pages.
+      if (loadedRef.current && loadedRef.current.filePath !== filePath) {
+        setLoaded(null)
+        setError(null)
+      }
       return
     }
     let cancelled = false
