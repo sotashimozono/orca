@@ -62,20 +62,42 @@ function readHeaderNumber(text: string, key: string, fallback: number): number {
   return match ? Number(match[1]) : fallback
 }
 
+// sp per unit, as _synctex_scan_float_and_dimension converts a post scriptum dimension.
+const SP_PER_DIMENSION_UNIT: Record<string, number> = {
+  in: 72.27 * 65536,
+  cm: (72.27 * 65536) / 2.54,
+  mm: (72.27 * 65536) / 25.4,
+  pt: 65536,
+  bp: (72.27 / 72) * 65536,
+  pc: 12 * 65536,
+  sp: 1,
+  dd: (1238 / 1157) * 65536,
+  cc: (14856 / 1157) * 65536,
+  nd: (685 / 642) * 65536,
+  nc: (1370 / 107) * 65536
+}
+
+/** A post scriptum offset in PDF points: a dimension (bare numbers are sp), not in `Unit`s. */
+function readPostOffset(post: string, key: string): number | null {
+  const match = new RegExp(`^${key}:(-?[\\d.]+(?:e[-+]?\\d+)?)\\s*([a-z]{2})?`, 'mi').exec(post)
+  const spPerUnit = match ? SP_PER_DIMENSION_UNIT[match[2]?.toLowerCase() ?? 'sp'] : undefined
+  return match && spPerUnit !== undefined ? (Number(match[1]) * spPerUnit) / SP_PER_BP : null
+}
+
 export function parseSynctex(text: string): SynctexDocument {
   const postIndex = text.search(/^Post scriptum:/m)
   const preamble = postIndex === -1 ? text : text.slice(0, postIndex)
   const post = postIndex === -1 ? '' : text.slice(postIndex)
   const unit = readHeaderNumber(preamble, 'Unit', 1)
   // Why: as in synctex_parser.c, the preamble Magnification is per mille, while a post
-  // scriptum Magnification is a float multiplier on top of it; post offsets replace the
-  // preamble's. DVI-routed builds (upLaTeX + dvipdfmx) store coordinates relative to TeX's
-  // 1in origin and put that 1in in the X/Y Offset header.
+  // scriptum Magnification is a float multiplier on top of it; a post offset replaces the
+  // preamble's and is a dimension, not a count of `Unit`s. DVI-routed builds (upLaTeX +
+  // dvipdfmx) store coordinates relative to TeX's 1in origin and put that 1in in X/Y Offset.
   const magnification =
     (readHeaderNumber(preamble, 'Magnification', 1000) / 1000) *
     readHeaderNumber(post, 'Magnification', 1)
   const offset = (key: string): number =>
-    (readHeaderNumber(post, key, readHeaderNumber(preamble, key, 0)) * unit) / SP_PER_BP
+    readPostOffset(post, key) ?? (readHeaderNumber(preamble, key, 0) * unit) / SP_PER_BP
   const frame: Frame = {
     scale: (unit * magnification) / SP_PER_BP,
     xOffset: offset('X Offset'),

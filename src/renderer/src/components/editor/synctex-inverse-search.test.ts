@@ -15,11 +15,13 @@ function sp(points: number): number {
 function synctexFile({
   offset = 0,
   magnification = 1000,
+  unit = 1,
   postScriptum = [],
   body
 }: {
   offset?: number
   magnification?: number
+  unit?: number
   postScriptum?: string[]
   body: string[]
 }): string {
@@ -29,7 +31,7 @@ function synctexFile({
     'Input:2:/project/./chapter.tex',
     'Output:pdf',
     `Magnification:${magnification}`,
-    'Unit:1',
+    `Unit:${unit}`,
     `X Offset:${offset}`,
     `Y Offset:${offset}`,
     'Content:',
@@ -174,18 +176,38 @@ describe('synctexInverseSearch', () => {
   })
 
   it('applies a Post scriptum Magnification as a multiplier on the preamble one', () => {
+    // 2000‰ in the preamble times 2 in the post scriptum: raw coordinates are a quarter size.
     const scaled = parseSynctex(
       synctexFile({
+        magnification: 2000,
         postScriptum: ['Magnification:2'],
         body: [
-          `(1,4:${sp(100 / 2)},${sp(200 / 2)}:${sp(150)},${sp(4)},${sp(1)}`,
-          `k1,4:${sp(110 / 2)},${sp(200 / 2)}:${sp(3)}`,
+          `(1,4:${sp(100 / 4)},${sp(200 / 4)}:${sp(75)},${sp(2)},${sp(0.5)}`,
+          `k1,4:${sp(110 / 4)},${sp(200 / 4)}:${sp(3)}`,
           ')'
         ]
       })
     )
     expect(
       synctexSourceRangesInRect(scaled, 1, { left: 90, top: 190, right: 410, bottom: 205 })
+    ).toEqual([{ filePath: '/project/main.tex', startLine: 4, endLine: 4 }])
+  })
+
+  it('reads a Post scriptum offset as a dimension, not in preamble Units', () => {
+    // Unit:2 doubles raw coordinates, but `72bp` stays 72bp: it is not a count of Units.
+    const withUnits = parseSynctex(
+      synctexFile({
+        unit: 2,
+        postScriptum: ['X Offset:72bp', 'Y Offset:72bp'],
+        body: [
+          `(1,4:${sp((100 - 72) / 2)},${sp((200 - 72) / 2)}:${sp(150)},${sp(4)},${sp(1)}`,
+          `k1,4:${sp((110 - 72) / 2)},${sp((200 - 72) / 2)}:${sp(1.5)}`,
+          ')'
+        ]
+      })
+    )
+    expect(
+      synctexSourceRangesInRect(withUnits, 1, { left: 90, top: 190, right: 410, bottom: 205 })
     ).toEqual([{ filePath: '/project/main.tex', startLine: 4, endLine: 4 }])
   })
 
