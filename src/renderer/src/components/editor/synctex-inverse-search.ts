@@ -24,7 +24,8 @@ export type SynctexSourceLocation = { filePath: string; line: number }
 // sp → PDF big points (72.27 TeX pt per 72 bp).
 const SP_PER_BP = 65781.76
 
-const LINK_RE = /^(\d+),(-?\d+)(?:,-?\d+)?:(-?\d+),(-?\d+)(?::(-?\d+),(-?\d+),(-?\d+))?/
+// The second coordinate may be `=`: a compressed point that repeats the last full one's.
+const LINK_RE = /^(\d+),(-?\d+)(?:,-?\d+)?:(-?\d+),(-?\d+|=)(?::(-?\d+),(-?\d+),(-?\d+))?/
 
 type ParsedLine = SynctexLink & {
   x: number
@@ -34,27 +35,32 @@ type ParsedLine = SynctexLink & {
   depth: number
 }
 
-type Frame = { scale: number; xOffset: number; yOffset: number }
+/** `xOffset`/`yOffset` are already in PDF points: synctex_parser.c does not magnify them. */
+type Frame = { scale: number; xOffset: number; yOffset: number; lastRawY: number }
 
-function parseLinkLine(body: string, { scale, xOffset, yOffset }: Frame): ParsedLine | null {
+function parseLinkLine(body: string, frame: Frame): ParsedLine | null {
   const match = LINK_RE.exec(body)
   if (!match) {
     return null
   }
+  const rawY = match[4] === '=' ? frame.lastRawY : Number(match[4])
+  frame.lastRawY = rawY
+  const { scale } = frame
   return {
     tag: Number(match[1]),
     line: Number(match[2]),
-    x: (Number(match[3]) + xOffset) * scale,
-    y: (Number(match[4]) + yOffset) * scale,
+    x: Number(match[3]) * scale + frame.xOffset,
+    y: rawY * scale + frame.yOffset,
     width: Number(match[5] ?? 0) * scale,
     height: Number(match[6] ?? 0) * scale,
     depth: Number(match[7] ?? 0) * scale
   }
 }
 
+/** The last value wins, so a `Post scriptum:` entry overrides the preamble's. */
 function readHeaderNumber(text: string, key: string, fallback: number): number {
-  const match = new RegExp(`^${key}:(-?[\\d.]+)`, 'm').exec(text)
-  return match ? Number(match[1]) : fallback
+  const last = [...text.matchAll(new RegExp(`^${key}:(-?[\\d.]+)`, 'gm'))].at(-1)
+  return last ? Number(last[1]) : fallback
 }
 
 export function parseSynctex(text: string): SynctexDocument {
@@ -64,8 +70,9 @@ export function parseSynctex(text: string): SynctexDocument {
   // TeX's 1in origin and put that 1in in the X/Y Offset header.
   const frame: Frame = {
     scale: (unit * magnification) / 1000 / SP_PER_BP,
-    xOffset: readHeaderNumber(text, 'X Offset', 0),
-    yOffset: readHeaderNumber(text, 'Y Offset', 0)
+    xOffset: (readHeaderNumber(text, 'X Offset', 0) * unit) / SP_PER_BP,
+    yOffset: (readHeaderNumber(text, 'Y Offset', 0) * unit) / SP_PER_BP,
+    lastRawY: 0
   }
 
   const inputs = new Map<number, string>()
@@ -105,6 +112,10 @@ export function parseSynctex(text: string): SynctexDocument {
     }
     const parsed = parseLinkLine(body, frame)
     if (!parsed) {
+      // Why: an opener we cannot read still has a closer; keep the stack in step with it.
+      if (kind === '(' || kind === '[') {
+        boxStack.push(null)
+      }
       continue
     }
     if (kind === '(') {
@@ -125,7 +136,8 @@ export function parseSynctex(text: string): SynctexDocument {
       boxStack.push(null)
       continue
     }
-    if (kind === 'x' || kind === 'k' || kind === 'g' || kind === '$' || kind === 'h') {
+    // Why: `h`/`v` are void boxes (leaves), not the text a word came from.
+    if (kind === 'x' || kind === 'k' || kind === 'g' || kind === '$') {
       boxStack
         .at(-1)
         ?.records.push({ tag: parsed.tag, line: parsed.line, x: parsed.x, current: kind === 'x' })

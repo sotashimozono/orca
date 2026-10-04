@@ -12,13 +12,23 @@ function sp(points: number): number {
   return Math.round(points * BP)
 }
 
-function synctexFile({ offset = 0, body }: { offset?: number; body: string[] }): string {
+function synctexFile({
+  offset = 0,
+  magnification = 1000,
+  postScriptum = [],
+  body
+}: {
+  offset?: number
+  magnification?: number
+  postScriptum?: string[]
+  body: string[]
+}): string {
   return [
     'SyncTeX Version:1',
     'Input:1:/project/./main.tex',
     'Input:2:/project/./chapter.tex',
     'Output:pdf',
-    'Magnification:1000',
+    `Magnification:${magnification}`,
     'Unit:1',
     `X Offset:${offset}`,
     `Y Offset:${offset}`,
@@ -26,7 +36,8 @@ function synctexFile({ offset = 0, body }: { offset?: number; body: string[] }):
     '{1',
     ...body,
     '}1',
-    'Postamble:'
+    'Postamble:',
+    ...(postScriptum.length > 0 ? ['Post scriptum:', ...postScriptum] : [])
   ].join('\n')
 }
 
@@ -96,6 +107,86 @@ describe('synctexInverseSearch', () => {
 
   it('returns null for a page with no boxes', () => {
     expect(synctexInverseSearch(doc, 2, 200, 197)).toBeNull()
+  })
+
+  it('reads compressed points (`x,=`) as repeating the last full point’s second coordinate', () => {
+    const compressed = parseSynctex(
+      synctexFile({
+        body: [
+          `(1,9:${sp(100)},${sp(200)}:${sp(300)},${sp(8)},${sp(2)}`,
+          `k1,5:${sp(250)},=:${sp(3)}`,
+          ')',
+          `(1,9:${sp(100)},${sp(260)}:${sp(300)},${sp(8)},${sp(2)}`,
+          `k1,7:${sp(110)},=:${sp(3)}`,
+          ')'
+        ]
+      })
+    )
+    expect(synctexInverseSearch(compressed, 1, 300, 197)?.line).toBe(5)
+    expect(synctexInverseSearch(compressed, 1, 200, 257)?.line).toBe(7)
+  })
+
+  it('keeps the box stack in step when an opener cannot be read', () => {
+    const unreadable = parseSynctex(
+      synctexFile({
+        body: [
+          `(1,9:${sp(100)},${sp(200)}:${sp(300)},${sp(8)},${sp(2)}`,
+          '[not a link',
+          ']',
+          `k1,3:${sp(110)},${sp(200)}:${sp(3)}`,
+          ')'
+        ]
+      })
+    )
+    expect(synctexInverseSearch(unreadable, 1, 200, 197)?.line).toBe(3)
+  })
+
+  it('does not credit a void hbox as the line a word came from', () => {
+    const withVoidBox = parseSynctex(
+      synctexFile({
+        body: [
+          `(1,9:${sp(100)},${sp(200)}:${sp(300)},${sp(8)},${sp(2)}`,
+          `k1,4:${sp(110)},${sp(200)}:${sp(3)}`,
+          `h1,42:${sp(200)},${sp(200)}:0,0,0`,
+          ')'
+        ]
+      })
+    )
+    expect(synctexInverseSearch(withVoidBox, 1, 250, 197)?.line).toBe(4)
+  })
+
+  it('magnifies coordinates but not the X/Y Offset, as synctex_parser.c does', () => {
+    const magnified = parseSynctex(
+      synctexFile({
+        offset: sp(72),
+        magnification: 2000,
+        body: [
+          `(1,4:${sp((100 - 72) / 2)},${sp((200 - 72) / 2)}:${sp(150)},${sp(4)},${sp(1)}`,
+          `k1,4:${sp((110 - 72) / 2)},${sp((200 - 72) / 2)}:${sp(3)}`,
+          ')'
+        ]
+      })
+    )
+    // A rect over where the line really is: a magnified offset would put the box elsewhere.
+    expect(
+      synctexSourceRangesInRect(magnified, 1, { left: 90, top: 190, right: 410, bottom: 205 })
+    ).toEqual([{ filePath: '/project/main.tex', startLine: 4, endLine: 4 }])
+  })
+
+  it('lets a Post scriptum offset override the preamble', () => {
+    const overridden = parseSynctex(
+      synctexFile({
+        postScriptum: [`X Offset:${sp(72)}`, `Y Offset:${sp(72)}`],
+        body: [
+          `(1,4:${sp(100 - 72)},${sp(200 - 72)}:${sp(300)},${sp(8)},${sp(2)}`,
+          `k1,4:${sp(110 - 72)},${sp(200 - 72)}:${sp(3)}`,
+          ')'
+        ]
+      })
+    )
+    expect(
+      synctexSourceRangesInRect(overridden, 1, { left: 90, top: 190, right: 410, bottom: 205 })
+    ).toEqual([{ filePath: '/project/main.tex', startLine: 4, endLine: 4 }])
   })
 })
 

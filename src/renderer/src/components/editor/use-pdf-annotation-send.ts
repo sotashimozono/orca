@@ -20,15 +20,22 @@ export function usePdfAnnotationSend(
     () => [...new Set(annotations.flatMap((a) => a.sources?.map((s) => s.path) ?? []))].join('\n'),
     [annotations]
   )
+  const staleRequestRef = useRef(0)
   // Why: re-stats every time a prompt goes out — the agent may have edited the .tex since the
   // PDF was built, and a stale warning is only useful if it matches the files right now.
   const freshPrompt = useCallback(async (): Promise<string> => {
+    const request = ++staleRequestRef.current
     const paths = sourcePathsKey ? sourcePathsKey.split('\n') : []
     const stale =
       synctex && paths.length > 0
         ? await synctex.findStaleSources(paths).catch((): string[] => [])
         : []
-    setStaleSources((current) => (current.join('\n') === stale.join('\n') ? current : stale))
+    // Why: only the newest call may publish; an older one resolving late would restore the
+    // previous annotation set's warning. The tray's send menu reads this state: it opens only
+    // after the send-open call resolves, in the same render as its write.
+    if (request === staleRequestRef.current) {
+      setStaleSources((current) => (current.join('\n') === stale.join('\n') ? current : stale))
+    }
     return formatPdfAnnotationsAsMarkdown(displayPath, annotations, stale)
   }, [annotations, displayPath, sourcePathsKey, synctex])
   useEffect(() => {
