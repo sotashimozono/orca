@@ -5,6 +5,9 @@ import type { BrowserAnnotationIntent } from '../../../../shared/browser-grab-ty
 /** A dragged box on one page, in PDF points from that page's top-left. */
 export type PdfRegion = { page: number; left: number; top: number; right: number; bottom: number }
 
+/** TeX source lines behind a mark, from SyncTeX; `path` is worktree-relative when it can be. */
+export type PdfSourceRange = { path: string; startLine: number; endLine: number }
+
 /** A comment pinned to a point on a PDF page; in-memory like browser Design Mode annotations. */
 export type PdfAnnotation = {
   id: string
@@ -17,6 +20,8 @@ export type PdfAnnotation = {
   /** Empty for a plain click; one or more boxes when dragged (Shift+drag adds more). */
   regions: PdfRegion[]
   quote: string | null
+  /** Resolved when the mark was made, so they match the PDF the reader saw. Absent without SyncTeX. */
+  sources?: PdfSourceRange[]
   comment: string
   intent: BrowserAnnotationIntent
   createdAt: string
@@ -32,12 +37,14 @@ export function createPdfAnnotation(
   fileKey: string,
   draft: PdfAnnotationDraft,
   comment: string,
-  intent: BrowserAnnotationIntent
+  intent: BrowserAnnotationIntent,
+  sources: PdfSourceRange[] = []
 ): PdfAnnotation {
   return {
     id: `pdf-annotation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     fileKey,
     ...draft,
+    ...(sources.length > 0 ? { sources } : {}),
     comment,
     intent,
     createdAt: new Date().toISOString()

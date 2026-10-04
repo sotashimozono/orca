@@ -3,6 +3,7 @@ import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import { useAppStore } from '@/store'
 import { createPdfAnnotation, type PdfAnnotation } from '@/store/slices/pdf-annotations'
 import type { BrowserAnnotationIntent } from '../../../../shared/browser-grab-types'
+import type { PdfSynctex } from './use-pdf-synctex'
 import { pdfPagePointAt, pdfRegionFromClientRect } from './pdf-page-geometry'
 import { projectPdfAnnotations } from './pdf-annotation-projection'
 import {
@@ -21,6 +22,8 @@ export type PdfAnnotationContext = {
   fileKey: string
   worktreeId: string
   displayPath: string
+  /** Present when the PDF has SyncTeX beside it; marks then carry their TeX source lines. */
+  synctex?: PdfSynctex | null
 }
 
 export type { PdfContentRect }
@@ -44,6 +47,7 @@ export function usePdfAnnotateMode({
   pdfViewerRef: RefObject<PDFViewer | null>
 }) {
   const fileKey = context?.fileKey ?? null
+  const synctex = context?.synctex ?? null
   // Why: mode and draft live in the store per file: the viewer is reused across PDF tabs, and
   // a rename re-keys them with the file's annotations instead of stranding a half-written comment.
   const session = useAppStore((s) => (fileKey ? s.pdfAnnotateSessions[fileKey] : undefined))
@@ -291,11 +295,12 @@ export function usePdfAnnotateMode({
       if (!pending || !fileKey) {
         return
       }
-      addPdfAnnotation(createPdfAnnotation(fileKey, pending, comment, intent))
+      const sources = synctex?.resolve(pending) ?? []
+      addPdfAnnotation(createPdfAnnotation(fileKey, pending, comment, intent, sources))
       // Stay armed after adding, as Design Mode rearms its picker.
       setPdfAnnotationDraft(fileKey, null)
     },
-    [addPdfAnnotation, fileKey, pending, setPdfAnnotationDraft]
+    [addPdfAnnotation, fileKey, pending, setPdfAnnotationDraft, synctex]
   )
 
   const cancel = useCallback((): void => {

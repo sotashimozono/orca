@@ -1,4 +1,4 @@
-import type { PdfAnnotation, PdfRegion } from '@/store/slices/pdf-annotations'
+import type { PdfAnnotation, PdfRegion, PdfSourceRange } from '@/store/slices/pdf-annotations'
 import { inlineText } from '../browser-pane/annotate/browser-annotation-output'
 
 const TITLE_QUOTE_MAX_LENGTH = 60
@@ -17,18 +17,38 @@ export function pdfAnnotationTitle(
   return quote ? `${location} "${quote}"` : location
 }
 
-/** Mirrors browser Design Mode's prompt shape so agents read both the same way. */
+function formatSourceRange(range: PdfSourceRange): string {
+  const lines =
+    range.startLine === range.endLine ? `${range.startLine}` : `${range.startLine}-${range.endLine}`
+  return `${range.path}:${lines}`
+}
+
+/**
+ * Mirrors browser Design Mode's prompt shape so agents read both the same way. `staleSources`
+ * are TeX files edited after the PDF was built, whose SyncTeX lines may no longer match.
+ */
 export function formatPdfAnnotationsAsMarkdown(
   pdfPath: string,
-  annotations: readonly PdfAnnotation[]
+  annotations: readonly PdfAnnotation[],
+  staleSources: readonly string[] = []
 ): string {
   if (annotations.length === 0) {
     return ''
   }
   const lines: string[] = [`## PDF Feedback: ${pdfPath}`, '', `**File:** ${pdfPath}`, '']
+  if (staleSources.length > 0) {
+    const files = staleSources.map((path) => `\`${path}\``).join(', ')
+    lines.push(
+      `**Warning:** ${files} changed after this PDF was built, so the source lines below may be off. Check them before editing, or rebuild and annotate again.`,
+      ''
+    )
+  }
   annotations.forEach((annotation, index) => {
     lines.push(`### ${index + 1}. Page ${annotation.page}`)
     lines.push(`**Intent:** ${annotation.intent}`)
+    if (annotation.sources && annotation.sources.length > 0) {
+      lines.push(`**Source:** ${annotation.sources.map(formatSourceRange).join('; ')}`)
+    }
     if (annotation.regions.length > 0) {
       lines.push(
         `**Areas:** ${annotation.regions.map(formatRegion).join('; ')} (PDF points from the page's top-left)`

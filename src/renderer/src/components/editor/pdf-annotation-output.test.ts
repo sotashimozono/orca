@@ -65,6 +65,32 @@ describe('formatPdfAnnotationsAsMarkdown', () => {
     expect(prompt).toContain('**Text in areas (approximate):** "E = mc"')
     expect(prompt).not.toContain('**Position:**')
   })
+
+  it('names the TeX source lines behind a mark when SyncTeX resolved them', () => {
+    const prompt = formatPdfAnnotationsAsMarkdown('out/main.pdf', [
+      annotation({
+        sources: [
+          { path: 'sections/intro.tex', startLine: 84, endLine: 86 },
+          { path: 'main.tex', startLine: 12, endLine: 12 }
+        ]
+      }),
+      annotation({ id: 'b', comment: 'No SyncTeX here' })
+    ])
+    expect(prompt).toContain('**Source:** sections/intro.tex:84-86; main.tex:12')
+    expect(prompt.match(/\*\*Source:\*\*/g)).toHaveLength(1)
+    expect(prompt).not.toContain('**Warning:**')
+  })
+
+  it('warns once, up front, when sources changed after the PDF was built', () => {
+    const prompt = formatPdfAnnotationsAsMarkdown(
+      'out/main.pdf',
+      [annotation({ sources: [{ path: 'main.tex', startLine: 3, endLine: 4 }] })],
+      ['main.tex']
+    )
+    expect(prompt.split('\n').slice(4, 5)).toEqual([
+      '**Warning:** `main.tex` changed after this PDF was built, so the source lines below may be off. Check them before editing, or rebuild and annotate again.'
+    ])
+  })
 })
 
 describe('pdfAnnotationTitle', () => {

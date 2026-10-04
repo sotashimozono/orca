@@ -14,9 +14,29 @@ export function usePdfAnnotationSend(
   const worktreeId = context?.worktreeId ?? ''
   const fileKey = context?.fileKey ?? ''
   const displayPath = context?.displayPath ?? ''
+  const synctex = context?.synctex ?? null
+  const [staleSources, setStaleSources] = useState<string[]>([])
+  const sourcePathsKey = useMemo(
+    () => [...new Set(annotations.flatMap((a) => a.sources?.map((s) => s.path) ?? []))].join('\n'),
+    [annotations]
+  )
+  // Why: re-stats every time a prompt goes out — the agent may have edited the .tex since the
+  // PDF was built, and a stale warning is only useful if it matches the files right now.
+  const freshPrompt = useCallback(async (): Promise<string> => {
+    const paths = sourcePathsKey ? sourcePathsKey.split('\n') : []
+    const stale =
+      synctex && paths.length > 0
+        ? await synctex.findStaleSources(paths).catch((): string[] => [])
+        : []
+    setStaleSources((current) => (current.join('\n') === stale.join('\n') ? current : stale))
+    return formatPdfAnnotationsAsMarkdown(displayPath, annotations, stale)
+  }, [annotations, displayPath, sourcePathsKey, synctex])
+  useEffect(() => {
+    void freshPrompt()
+  }, [freshPrompt])
   const prompt = useMemo(
-    () => formatPdfAnnotationsAsMarkdown(displayPath, annotations),
-    [annotations, displayPath]
+    () => formatPdfAnnotationsAsMarkdown(displayPath, annotations, staleSources),
+    [annotations, displayPath, staleSources]
   )
   const activeGroupId = useAppStore((s) => s.activeGroupIdByWorktree[worktreeId])
   const openAgentSendPopoverTargetMode = useAppStore((s) => s.openAgentSendPopoverTargetMode)
@@ -46,36 +66,43 @@ export function usePdfAnnotationSend(
         closeAgentSendPopoverTargetMode(sendModeId)
         return
       }
-      openAgentSendPopoverTargetMode({
-        id: sendModeId,
-        worktreeId,
-        // Same delivery path and agent picker as browser Design Mode.
-        source: 'browser-annotations',
-        prompt,
-        label: translate('auto.components.editor.PdfViewer.pdfAnnotationsLabel', 'PDF annotations'),
-        launchSource: 'notes_send',
-        onPromptDelivered: handleSentToAgent
-      })
+      void freshPrompt().then((current) =>
+        openAgentSendPopoverTargetMode({
+          id: sendModeId,
+          worktreeId,
+          // Same delivery path and agent picker as browser Design Mode.
+          source: 'browser-annotations',
+          prompt: current,
+          label: translate(
+            'auto.components.editor.PdfViewer.pdfAnnotationsLabel',
+            'PDF annotations'
+          ),
+          launchSource: 'notes_send',
+          onPromptDelivered: handleSentToAgent
+        })
+      )
     },
     [
       closeAgentSendPopoverTargetMode,
+      freshPrompt,
       handleSentToAgent,
       openAgentSendPopoverTargetMode,
-      prompt,
       sendModeId,
       worktreeId
     ]
   )
 
   const handleCopy = useCallback((): void => {
-    if (!prompt) {
-      return
-    }
-    void window.api.ui.writeClipboardText(prompt)
-    clearTimeout(copyTimerRef.current)
-    setCopied(true)
-    copyTimerRef.current = setTimeout(() => setCopied(false), 1400)
-  }, [prompt])
+    void freshPrompt().then((current) => {
+      if (!current) {
+        return
+      }
+      void window.api.ui.writeClipboardText(current)
+      clearTimeout(copyTimerRef.current)
+      setCopied(true)
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1400)
+    })
+  }, [freshPrompt])
 
   const handleClear = useCallback((): void => {
     clearTimeout(copyTimerRef.current)
