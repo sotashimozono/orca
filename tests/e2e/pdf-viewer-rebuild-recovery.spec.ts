@@ -1,18 +1,30 @@
 import { rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import type { Page, TestInfo } from '@stablyai/playwright-test'
 import { expect, test } from './helpers/orca-app'
 import { createPdfFindFixture } from './helpers/pdf-find-fixture'
 
+const ERROR_TEXT = 'Failed to load PDF preview'
+
+async function settleAndCapture(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+  // Past the editor's 75ms external-reload debounce and the pdf.js parse.
+  await page.waitForTimeout(1500)
+  await page.screenshot({ path: testInfo.outputPath(`${name}.png`) })
+}
+
 // A LaTeX build rewrites its PDF in place over several seconds; the editor's
 // external-change reload can pick up the half-written file before the final one.
-test('PDF preview recovers when a half-written PDF is replaced by the finished one', async ({
+test('PDF preview survives a rebuild that is read half-written', async ({
   orcaPage,
   seededRepoPath,
   registerPostElectronShutdownCleanup
 }, testInfo) => {
   const filePath = path.join(seededRepoPath, 'rebuilt.pdf')
   const finished = createPdfFindFixture()
-  writeFileSync(filePath, finished)
+  const halfWritten = finished.subarray(0, Math.floor(finished.length / 2))
+  const pages = orcaPage.locator('.pdfViewer .page')
+  const error = orcaPage.getByText(ERROR_TEXT)
+  writeFileSync(filePath, halfWritten)
   registerPostElectronShutdownCleanup(async () => rmSync(filePath, { force: true }))
   await orcaPage.evaluate((filePath) => {
     const state = window.__store?.getState()
@@ -27,16 +39,20 @@ test('PDF preview recovers when a half-written PDF is replaced by the finished o
       mode: 'edit'
     })
   }, filePath)
-  const pages = orcaPage.locator('.pdfViewer .page')
-  await expect(pages).toHaveCount(3)
-
-  writeFileSync(filePath, finished.subarray(0, Math.floor(finished.length / 2)))
-  await expect(orcaPage.getByText('Failed to load PDF preview')).toBeVisible()
+  // Nothing good has loaded yet, so the broken file shows the error.
+  await expect(error).toBeVisible()
 
   writeFileSync(filePath, finished)
-  // Past the 75ms reload debounce, so the screenshot shows the settled state.
-  await orcaPage.waitForTimeout(1500)
-  await orcaPage.screenshot({ path: testInfo.outputPath('after-finished-pdf-lands.png') })
-  await expect(orcaPage.getByText('Failed to load PDF preview')).toBeHidden()
+  await settleAndCapture(orcaPage, testInfo, '1-finished-after-error')
+  await expect(error).toBeHidden()
+  await expect(pages).toHaveCount(3)
+
+  // The next build reads half-written again: the last good PDF stays on screen.
+  writeFileSync(filePath, halfWritten)
+  await settleAndCapture(orcaPage, testInfo, '2-rebuild-in-progress')
+  await expect(error).toBeHidden()
+  await expect(pages).toHaveCount(3)
+
+  writeFileSync(filePath, finished)
   await expect(pages).toHaveCount(3)
 })

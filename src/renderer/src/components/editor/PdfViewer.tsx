@@ -17,7 +17,7 @@ import { keybindingMatchesAction } from '../../../../shared/keybindings'
 
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { translate } from '@/i18n/i18n'
-import { buildPdfJsDocumentOptions } from './pdf-js-document-options'
+import { usePdfDocumentLoad } from './use-pdf-document-load'
 import {
   applyPdfScalePreference,
   stepPdfScalePreference,
@@ -42,6 +42,19 @@ const SCALE_BOUNDS = { min: MIN_SCALE, max: MAX_SCALE, step: SCALE_STEP }
 // window-level keydown would also fire for typing in an unrelated pane.
 const USER_SCROLL_INPUT_EVENTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
 
+/** Outside the effect: react-doctor's effect-needs-cleanup can't see a detach handed back
+ *  through a closure; the viewer effect's cleanup still calls it. */
+function watchUserScrollInput(container: HTMLElement, onInput: () => void): () => void {
+  for (const type of USER_SCROLL_INPUT_EVENTS) {
+    container.addEventListener(type, onInput, { passive: true })
+  }
+  return () => {
+    for (const type of USER_SCROLL_INPUT_EVENTS) {
+      container.removeEventListener(type, onInput)
+    }
+  }
+}
+
 type PdfViewerProps = {
   content: string
   filePath: string
@@ -61,7 +74,6 @@ export default function PdfViewer({
 }: PdfViewerProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerDivRef = useRef<HTMLDivElement>(null)
-  const [pdfError, setPdfError] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [scale, setScale] = useState(1)
   const keybindings = useAppStore((state) => state.keybindings)
@@ -75,6 +87,7 @@ export default function PdfViewer({
 
   const filename = useMemo(() => filePath.split(/[/\\]/).pop() || filePath, [filePath])
   const cleanedContent = useMemo(() => content.replace(/\s/g, ''), [content])
+  const { loaded, error: pdfError } = usePdfDocumentLoad(cleanedContent, filePath, scrollCacheKey)
 
   // Why: restore the owner's preference outside render (refs mutated in render
   // can leak from discarded renders) and cover same-content/different-path opens.
@@ -91,24 +104,11 @@ export default function PdfViewer({
   useEffect(() => {
     const container = containerRef.current
     const viewerDiv = viewerDivRef.current
-    if (!container || !viewerDiv || !cleanedContent) {
+    if (!container || !viewerDiv || !loaded) {
       return
     }
-
-    setPdfError(null)
+    const { doc } = loaded
     let cancelled = false
-
-    let binary: string
-    try {
-      binary = window.atob(cleanedContent)
-    } catch {
-      setPdfError('Failed to decode PDF content')
-      return
-    }
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i += 1) {
-      bytes[i] = binary.charCodeAt(i)
-    }
 
     const eventBus = new EventBus()
     eventBusRef.current = eventBus
@@ -174,14 +174,10 @@ export default function PdfViewer({
       // record the restore's own scroll — which on a mixed-page-size document is
       // the provisional, wrong position, and a tab switch before pagesloaded
       // would then flush it over the good cached one.
-      for (const type of USER_SCROLL_INPUT_EVENTS) {
-        container.addEventListener(type, markUserMoved, { passive: true })
-      }
+      const detach = watchUserScrollInput(container, markUserMoved)
       detachInputWatcher = (): void => {
         detachInputWatcher = null
-        for (const type of USER_SCROLL_INPUT_EVENTS) {
-          container.removeEventListener(type, markUserMoved)
-        }
+        detach()
       }
     }
 
@@ -247,29 +243,10 @@ export default function PdfViewer({
     // input listener above can see.
     eventBus.on('find', markUserMoved)
 
-    const loadingTask = pdfjsLib.getDocument(buildPdfJsDocumentOptions(bytes, document.baseURI))
-
-    loadingTask.promise
-      .then((doc) => {
-        if (cancelled) {
-          loadingTask.destroy().catch(() => {})
-          return
-        }
-        viewer.setDocument(doc)
-        linkService.setDocument(doc)
-        findController.setDocument(doc)
-        applyPdfScalePreference(viewer, scalePreferenceRef.current, SCALE_BOUNDS)
-      })
-      .catch((err) => {
-        if (cancelled) {
-          return
-        }
-        if (err?.name === 'PasswordException') {
-          setPdfError('This PDF is password-protected')
-        } else {
-          setPdfError('Failed to load PDF preview')
-        }
-      })
+    viewer.setDocument(doc)
+    linkService.setDocument(doc)
+    findController.setDocument(doc)
+    applyPdfScalePreference(viewer, scalePreferenceRef.current, SCALE_BOUNDS)
 
     return () => {
       cancelled = true
@@ -283,9 +260,6 @@ export default function PdfViewer({
       eventBus.off('updateviewarea', handleUpdateViewArea)
       eventBus.off('find', markUserMoved)
       setFindOpen(false)
-      // Why: pdf.js 6 dropped PDFDocumentProxy.destroy(); destroying the loading
-      // task is what tears the document and its worker transport down.
-      loadingTask.destroy().catch(() => {})
       // Why: setDocument(null) is the proper teardown — it cancels active
       // renders, clears the find controller, and dispatches pagesdestroy.
       // The runtime accepts null but the types only declare PDFDocumentProxy.
@@ -297,10 +271,16 @@ export default function PdfViewer({
       findControllerRef.current = null
       pdfViewerRef.current = null
     }
-    // Why: scrollCacheKey is a dependency because two distinct paths can hold
-    // identical bytes — without it this effect would not re-run on the switch,
-    // and the second file would restore to the first file's position.
-  }, [cleanedContent, scrollCacheKey])
+  }, [loaded, scrollCacheKey])
+
+  // Why: declared after the viewer effect so, on a swap, the viewer drops the old document
+  // before its worker goes. pdf.js 6 dropped PDFDocumentProxy.destroy(); destroying the
+  // loading task is what tears the document down.
+  useEffect(() => {
+    return () => {
+      loaded?.task.destroy().catch(() => {})
+    }
+  }, [loaded])
 
   const closeFindBar = useCallback(() => {
     const eventBus = eventBusRef.current
@@ -391,8 +371,8 @@ export default function PdfViewer({
             <div ref={viewerDivRef} className="pdfViewer" />
           </div>
         </div>
-        {/* Why: an overlay, not a replacement — the load effect needs the viewer
-            container mounted to retry when the file is rewritten (e.g. a LaTeX build). */}
+        {/* Why: an overlay, not a replacement — the viewer effect needs its container
+            mounted to show the next document once the file is rewritten (e.g. a LaTeX build). */}
         {pdfError ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-8 text-sm text-muted-foreground">
             <ImageIcon size={40} />
