@@ -162,8 +162,8 @@ export function BrowserPageAnnotationTray<T extends TrayAnnotation>({
               className="text-muted-foreground hover:text-foreground"
               onClick={handleClearBrowserAnnotations}
               aria-label={translate(
-                'auto.components.browser.pane.BrowserPane.734e4343ec',
-                'Clear browser annotations'
+                'auto.components.browser.pane.BrowserPane.11c5084aa2',
+                'Clear annotations'
               )}
             >
               <Trash2 className="size-3" />
@@ -274,10 +274,7 @@ export function BrowserPageAnnotationTray<T extends TrayAnnotation>({
                     <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       <span>{annotation.intent}</span>
                       {getAnnotationElsewhereLabel?.(annotation) ? (
-                        <span
-                          className="truncate"
-                          title={getAnnotationElsewhereLabel(annotation)}
-                        >
+                        <span className="truncate" title={getAnnotationElsewhereLabel(annotation)}>
                           {getAnnotationElsewhereLabel(annotation)}
                         </span>
                       ) : null}
