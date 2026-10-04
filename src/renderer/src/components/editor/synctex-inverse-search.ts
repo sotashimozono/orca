@@ -57,21 +57,29 @@ function parseLinkLine(body: string, frame: Frame): ParsedLine | null {
   }
 }
 
-/** The last value wins, so a `Post scriptum:` entry overrides the preamble's. */
 function readHeaderNumber(text: string, key: string, fallback: number): number {
-  const last = [...text.matchAll(new RegExp(`^${key}:(-?[\\d.]+)`, 'gm'))].at(-1)
-  return last ? Number(last[1]) : fallback
+  const match = new RegExp(`^${key}:(-?[\\d.]+)`, 'm').exec(text)
+  return match ? Number(match[1]) : fallback
 }
 
 export function parseSynctex(text: string): SynctexDocument {
-  const magnification = readHeaderNumber(text, 'Magnification', 1000)
-  const unit = readHeaderNumber(text, 'Unit', 1)
-  // Why: DVI-routed builds (upLaTeX + dvipdfmx) store coordinates relative to
-  // TeX's 1in origin and put that 1in in the X/Y Offset header.
+  const postIndex = text.search(/^Post scriptum:/m)
+  const preamble = postIndex === -1 ? text : text.slice(0, postIndex)
+  const post = postIndex === -1 ? '' : text.slice(postIndex)
+  const unit = readHeaderNumber(preamble, 'Unit', 1)
+  // Why: as in synctex_parser.c, the preamble Magnification is per mille, while a post
+  // scriptum Magnification is a float multiplier on top of it; post offsets replace the
+  // preamble's. DVI-routed builds (upLaTeX + dvipdfmx) store coordinates relative to TeX's
+  // 1in origin and put that 1in in the X/Y Offset header.
+  const magnification =
+    (readHeaderNumber(preamble, 'Magnification', 1000) / 1000) *
+    readHeaderNumber(post, 'Magnification', 1)
+  const offset = (key: string): number =>
+    (readHeaderNumber(post, key, readHeaderNumber(preamble, key, 0)) * unit) / SP_PER_BP
   const frame: Frame = {
-    scale: (unit * magnification) / 1000 / SP_PER_BP,
-    xOffset: (readHeaderNumber(text, 'X Offset', 0) * unit) / SP_PER_BP,
-    yOffset: (readHeaderNumber(text, 'Y Offset', 0) * unit) / SP_PER_BP,
+    scale: (unit * magnification) / SP_PER_BP,
+    xOffset: offset('X Offset'),
+    yOffset: offset('Y Offset'),
     lastRawY: 0
   }
 

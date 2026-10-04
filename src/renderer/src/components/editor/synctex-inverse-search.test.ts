@@ -173,6 +173,22 @@ describe('synctexInverseSearch', () => {
     ).toEqual([{ filePath: '/project/main.tex', startLine: 4, endLine: 4 }])
   })
 
+  it('applies a Post scriptum Magnification as a multiplier on the preamble one', () => {
+    const scaled = parseSynctex(
+      synctexFile({
+        postScriptum: ['Magnification:2'],
+        body: [
+          `(1,4:${sp(100 / 2)},${sp(200 / 2)}:${sp(150)},${sp(4)},${sp(1)}`,
+          `k1,4:${sp(110 / 2)},${sp(200 / 2)}:${sp(3)}`,
+          ')'
+        ]
+      })
+    )
+    expect(
+      synctexSourceRangesInRect(scaled, 1, { left: 90, top: 190, right: 410, bottom: 205 })
+    ).toEqual([{ filePath: '/project/main.tex', startLine: 4, endLine: 4 }])
+  })
+
   it('lets a Post scriptum offset override the preamble', () => {
     const overridden = parseSynctex(
       synctexFile({
