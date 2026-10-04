@@ -68,20 +68,24 @@ export function usePdfDocumentLoad(
       return
     }
     const task = pdfjsLib.getDocument(buildPdfJsDocumentOptions(bytes, document.baseURI))
+    // Why: true until the task is handed over or already destroyed, so a superseded
+    // load (a rebuild rewrites the file many times) is aborted exactly once.
+    let ownsTask = true
     task.promise
       .then((doc) => {
         if (cancelled) {
-          task.destroy().catch(() => {})
           return
         }
+        ownsTask = false
         setError(null)
         setLoaded({ doc, task, filePath })
       })
       .catch((err) => {
-        task.destroy().catch(() => {})
         if (cancelled) {
           return
         }
+        ownsTask = false
+        task.destroy().catch(() => {})
         fail(
           err?.name === 'PasswordException'
             ? 'This PDF is password-protected'
@@ -90,6 +94,9 @@ export function usePdfDocumentLoad(
       })
     return () => {
       cancelled = true
+      if (ownsTask) {
+        task.destroy().catch(() => {})
+      }
     }
     // Why: scrollCacheKey because two distinct paths can hold identical bytes — the
     // second file must get its own document so its scroll position is restored, not the first's.

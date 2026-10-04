@@ -113,6 +113,23 @@ describe('PdfViewer when the file is rewritten', () => {
     expect(shownDocuments.at(-1)).toBeNull()
   })
 
+  it('aborts a load that a newer write supersedes, exactly once', async () => {
+    const pending = {
+      promise: new Promise<unknown>(() => {}),
+      destroy: vi.fn(() => Promise.resolve())
+    }
+    const next = { name: 'next build' }
+    getDocument
+      .mockImplementationOnce(() => pending)
+      .mockImplementationOnce(() => loadingTask(next))
+    const view = render(<PdfViewer content={btoa('%PDF v1 slow')} filePath="out/main.pdf" />)
+
+    view.rerender(<PdfViewer content={btoa('%PDF v2')} filePath="out/main.pdf" />)
+
+    await waitFor(() => expect(shownDocuments.at(-1)).toBe(next))
+    expect(pending.destroy).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the document when its own file reads empty mid-rebuild', async () => {
     const previous = { name: 'previous build' }
     getDocument.mockImplementationOnce(() => loadingTask(previous))
