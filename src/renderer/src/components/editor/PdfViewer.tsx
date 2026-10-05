@@ -9,6 +9,7 @@ import {
   PDFViewer as PdfJsViewer
 } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import 'pdfjs-dist/web/pdf_viewer.css'
+import { attachPdfRelativeFileLinks } from './pdf-relative-file-links'
 import PdfFind from './PdfFind'
 import { getShortcutPlatform } from '@/lib/shortcut-platform'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
@@ -51,14 +52,19 @@ type PdfViewerProps = {
   // Why: absent means "no scroll memory" — the diff and conflict-review callers
   // mount several viewers on one path, so a shared key would cross-write.
   scrollCacheKey?: string | null
+  // Why: absent means the viewer has no owner to resolve a linked file against.
+  onOpenRelativeFileLink?: (href: string) => void
 }
 
 export default function PdfViewer({
   content,
   filePath,
   preferenceKey = null,
-  scrollCacheKey = null
+  scrollCacheKey = null,
+  onOpenRelativeFileLink
 }: PdfViewerProps): JSX.Element {
+  const onOpenRelativeFileLinkRef = useRef(onOpenRelativeFileLink)
+  onOpenRelativeFileLinkRef.current = onOpenRelativeFileLink
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerDivRef = useRef<HTMLDivElement>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
@@ -246,6 +252,9 @@ export default function PdfViewer({
     // bar sits outside this container — so a search is reader movement that no
     // input listener above can see.
     eventBus.on('find', markUserMoved)
+    const detachRelativeFileLinks = attachPdfRelativeFileLinks(eventBus, (href) =>
+      onOpenRelativeFileLinkRef.current?.(href)
+    )
 
     const loadingTask = pdfjsLib.getDocument(buildPdfJsDocumentOptions(bytes, document.baseURI))
 
@@ -282,6 +291,7 @@ export default function PdfViewer({
       eventBus.off('pagesloaded', handlePagesLoaded)
       eventBus.off('updateviewarea', handleUpdateViewArea)
       eventBus.off('find', markUserMoved)
+      detachRelativeFileLinks()
       setFindOpen(false)
       // Why: pdf.js 6 dropped PDFDocumentProxy.destroy(); destroying the loading
       // task is what tears the document and its worker transport down.

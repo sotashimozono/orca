@@ -19,6 +19,7 @@ import { ExternalFileChangeBanner } from './ExternalFileChangeBanner'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
 import { EditorMarkdownFileSurface } from './EditorMarkdownFileSurface'
 import type { MarkdownRenderState } from './markdown-render-mode'
+import { usePdfRelativeFileLinkOpener } from './use-pdf-relative-file-link-opener'
 
 const noopEditorContentChange = (_content: string): void => {}
 const noopEditorSave = async (_content: string): Promise<boolean> => false
@@ -90,6 +91,7 @@ export function EditorEditFileSurface({
   handleSave: (content: string) => Promise<boolean>
   reloadContent: (file: OpenFile) => void
 }): React.JSX.Element {
+  const openPdfRelativeFileLink = usePdfRelativeFileLinkOpener(activeFile)
   if (activeFile.conflict?.kind === 'conflict-placeholder') {
     return <ConflictPlaceholderView file={activeFile} />
   }
@@ -118,6 +120,7 @@ export function EditorEditFileSurface({
           mimeType={fileContent.mimeType}
           preferenceKey={pdfPreferenceKey}
           scrollCacheKey={pdfViewStateKey}
+          onOpenRelativeFileLink={openPdfRelativeFileLink}
         />
       )
     }
