@@ -64,7 +64,11 @@ export default function PdfViewer({
   onOpenRelativeFileLink
 }: PdfViewerProps): JSX.Element {
   const onOpenRelativeFileLinkRef = useRef(onOpenRelativeFileLink)
-  onOpenRelativeFileLinkRef.current = onOpenRelativeFileLink
+  // Why: written outside render, for the reason given at scalePreferenceRef.
+  useEffect(() => {
+    onOpenRelativeFileLinkRef.current = onOpenRelativeFileLink
+  }, [onOpenRelativeFileLink])
+  const opensRelativeFileLinks = onOpenRelativeFileLink !== undefined
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerDivRef = useRef<HTMLDivElement>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
@@ -252,9 +256,11 @@ export default function PdfViewer({
     // bar sits outside this container — so a search is reader movement that no
     // input listener above can see.
     eventBus.on('find', markUserMoved)
-    const detachRelativeFileLinks = attachPdfRelativeFileLinks(eventBus, (href) =>
-      onOpenRelativeFileLinkRef.current?.(href)
-    )
+    // Why: a viewer with no opener (diff, conflict review) must not turn these
+    // links into focusable boxes that do nothing.
+    const detachRelativeFileLinks = opensRelativeFileLinks
+      ? attachPdfRelativeFileLinks(eventBus, (href) => onOpenRelativeFileLinkRef.current?.(href))
+      : null
 
     const loadingTask = pdfjsLib.getDocument(buildPdfJsDocumentOptions(bytes, document.baseURI))
 
@@ -291,7 +297,7 @@ export default function PdfViewer({
       eventBus.off('pagesloaded', handlePagesLoaded)
       eventBus.off('updateviewarea', handleUpdateViewArea)
       eventBus.off('find', markUserMoved)
-      detachRelativeFileLinks()
+      detachRelativeFileLinks?.()
       setFindOpen(false)
       // Why: pdf.js 6 dropped PDFDocumentProxy.destroy(); destroying the loading
       // task is what tears the document and its worker transport down.
@@ -310,7 +316,7 @@ export default function PdfViewer({
     // Why: scrollCacheKey is a dependency because two distinct paths can hold
     // identical bytes — without it this effect would not re-run on the switch,
     // and the second file would restore to the first file's position.
-  }, [cleanedContent, scrollCacheKey])
+  }, [cleanedContent, scrollCacheKey, opensRelativeFileLinks])
 
   const closeFindBar = useCallback(() => {
     const eventBus = eventBusRef.current
